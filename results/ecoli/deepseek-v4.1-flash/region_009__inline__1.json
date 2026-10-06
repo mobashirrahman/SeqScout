@@ -1,0 +1,303 @@
+{
+  "started_at": "2026-10-05T23:44:17+00:00",
+  "prompt_hash": "6548b398e9a9",
+  "code_hash": "7c7d70e28d52",
+  "locus": "region_009",
+  "condition": "inline",
+  "model": "deepseek-v4.1-flash",
+  "effort": null,
+  "read_default": 2000,
+  "max_turns": 20,
+  "tool_calls": [
+    {
+      "turn": 0,
+      "name": "list_files",
+      "input": {},
+      "is_error": false,
+      "output_chars": 17,
+      "nt_run": 0
+    },
+    {
+      "turn": 0,
+      "name": "run_python",
+      "input": {
+        "code": "\nimport re\nseq = \"\"\nwith open(\"region.fasta\") as f:\n    lines = f.read().splitlines()\nheader = lines[0]\nseq = \"\".join(l.strip() for l in lines[1:])\nprint(\"header:\", header)\nprint(\"length:\", len(seq))\nfrom collections import Counter\nc = Counter(seq)\nprint(c)\ngc = (c['G']+c['C'])/len(seq)\nprint(\"GC content: %.3f\" % gc)\n# base composition overall top\nprint(sorted(c.items()))\n"
+      },
+      "is_error": false,
+      "output_chars": 150,
+      "nt_run": 0
+    },
+    {
+      "turn": 1,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\ncomp = str.maketrans(\"ACGT\",\"TGCA\")\ndef rc(s): return s.translate(comp)[::-1]\n\ndef orfs(s, minaa=30):\n    res=[]\n    for frame in range(3):\n        # find ORFs between stops\n        i=frame\n        start=None\n        # walk codon by codon\n        pos=frame\n        while pos+3<=len(s):\n            codon=s[pos:pos+3]\n            if codon==\"ATG\" and start is None:\n                start=pos\n            if codon in (\"TAA\",\"TAG\",\"TGA\"):\n                if start is not None:\n                    aa=(pos-start)//3\n                    if aa>=minaa:\n                        res.append((start,pos+3,aa))\n                    start=None\n            pos+=3\n        # trailing ORF to end\n        if start is not None:\n            aa=(len(s)-start)//3\n            if aa>=minaa:\n                res.append((start,len(s),aa))\n    return res\n\nfor name,s in [(\"+\",seq),(\"-\",rc(seq))]:\n    for st,en,aa in orfs(s):\n        print(name, st, en, aa, \"len_nt\",en-st)\n"
+      },
+      "is_error": false,
+      "output_chars": 507,
+      "nt_run": 0
+    },
+    {
+      "turn": 2,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\ncomp = str.maketrans(\"ACGT\",\"TGCA\")\ndef rc(s): return s.translate(comp)[::-1]\n\ncode = {\n 'TTT':'F','TTC':'F','TTA':'L','TTG':'L','CTT':'L','CTC':'L','CTA':'L','CTG':'L',\n 'ATT':'I','ATC':'I','ATA':'I','ATG':'M','GTT':'V','GTC':'V','GTA':'V','GTG':'V',\n 'TCT':'S','TCC':'S','TCA':'S','TCG':'S','CCT':'P','CCC':'P','CCA':'P','CCG':'P',\n 'ACT':'T','ACC':'T','ACA':'T','ACG':'T','GCT':'A','GCC':'A','GCA':'A','GCG':'A',\n 'TAT':'Y','TAC':'Y','TAA':'*','TAG':'*','CAT':'H','CAC':'H','CAA':'Q','CAG':'Q',\n 'AAT':'N','AAC':'N','AAA':'K','AAG':'K','GAT':'D','GAC':'D','GAA':'E','GAG':'E',\n 'TGT':'C','TGC':'C','TGA':'*','TGG':'W','CGT':'R','CGC':'R','CGA':'R','CGG':'R',\n 'AGT':'S','AGC':'S','AGA':'R','AGG':'R','GGT':'G','GGC':'G','GGA':'G','GGG':'G'}\n\ndef translate(s):\n    return \"\".join(code.get(s[i:i+3],'X') for i in range(0,len(s)-2,3))\n\nprint(\"=== ORF +270..1161 (296 aa) ===\")\nprint(translate(seq[270:1161]))\n\nprint()\nprint(\"=== ORF +2256..2526 ===\")\nprint(translate(seq[2256:2526]))\n\nprint()\nprint(\"=== ORF -325..928 (reverse) ===\")\nr = rc(seq)\nprint(translate(r[325:928]))\n"
+      },
+      "is_error": false,
+      "output_chars": 681,
+      "nt_run": 0
+    },
+    {
+      "turn": 3,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\nn=len(seq)\n# GC in 100-bp windows\nprint(\"GC per 200bp window:\")\nfor i in range(0,n,200):\n    w=seq[i:i+200]\n    gc=(w.count('G')+w.count('C'))/len(w)\n    print(f\"{i+1:5d}-{i+len(w):5d}  GC={gc:.3f}\")\n\n# dinucleotide / trinucleotide skew? check simple repeats\nimport re\nprint(\"\\nTandem repeats (unit 2-30, >=3 copies):\")\nfor unit in range(2,31):\n    for i in range(n):\n        j=i\n        cnt=0\n        while seq[j:j+unit]==seq[i:i+unit] and j+unit<=n:\n            j+=unit; cnt+=1\n        if cnt>=4 and unit*1 <= 60:\n            pass\n    # skip\n    \n# more efficient: find exact tandem repeats via regex backreference\nfound=set()\nfor unit in range(2,31):\n    pat=re.compile(r'((?:\\w{%d}))\\1{%d,}'%(unit,2))\n    for m in pat.finditer(seq):\n        s=m.group(0)\n        key=(m.start(),s)\n        if key in found: continue\n        found.add(key)\n        print(f\"  pos {m.start()+1}-{m.end()}: unit '{s[:unit]}' x{len(s)//unit}\")\n\n# inverted repeat / palindrome search\nprint(\"\\nLong inverted repeats (stem>=12):\")\nfor i in range(n):\n    for L in range(30,11,-1):\n        if i+L>n: continue\n        a=seq[i:i+L]\n        # look for reverse complement within some distance\n        target=a.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\n        idx=seq.find(target,i+L,min(n,i+L+50))\n        if idx!=-1:\n            print(f\"  stem {i+1}-{i+L} pairs with {idx+1}-{idx+L} (len {L})\")\n            break\n"
+      },
+      "is_error": false,
+      "output_chars": 968,
+      "nt_run": 0
+    },
+    {
+      "turn": 4,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\ncode = {\n 'TTT':'F','TTC':'F','TTA':'L','TTG':'L','CTT':'L','CTC':'L','CTA':'L','CTG':'L',\n 'ATT':'I','ATC':'I','ATA':'I','ATG':'M','GTT':'V','GTC':'V','GTA':'V','GTG':'V',\n 'TCT':'S','TCC':'S','TCA':'S','TCG':'S','CCT':'P','CCC':'P','CCA':'P','CCG':'P',\n 'ACT':'T','ACC':'T','ACA':'T','ACG':'T','GCT':'A','GCC':'A','GCA':'A','GCG':'A',\n 'TAT':'Y','TAC':'Y','TAA':'*','TAG':'*','CAT':'H','CAC':'H','CAA':'Q','CAG':'Q',\n 'AAT':'N','AAC':'N','AAA':'K','AAG':'K','GAT':'D','GAC':'D','GAA':'E','GAG':'E',\n 'TGT':'C','TGC':'C','TGA':'*','TGG':'W','CGT':'R','CGC':'R','CGA':'R','CGG':'R',\n 'AGT':'S','AGC':'S','AGA':'R','AGG':'R','GGT':'G','GGC':'G','GGA':'G','GGG':'G'}\ndef tr(s): return \"\".join(code.get(s[i:i+3],'X') for i in range(0,len(s)-2,3))\n\nfor (a,b) in [(19,214),(45,219),(257,380),(656,749),(1219,1636),(1649,2030),(2256,2526),(2525,2966),(2743,3000)]:\n    print(f\"+{a}..{b} ({b-a}nt):\")\n    print(\"   \", tr(seq[a:b]))\n    print()\n"
+      },
+      "is_error": false,
+      "output_chars": 1015,
+      "nt_run": 0
+    },
+    {
+      "turn": 5,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\ncode = {\n 'TTT':'F','TTC':'F','TTA':'L','TTG':'L','CTT':'L','CTC':'L','CTA':'L','CTG':'L',\n 'ATT':'I','ATC':'I','ATA':'I','ATG':'M','GTT':'V','GTC':'V','GTA':'V','GTG':'V',\n 'TCT':'S','TCC':'S','TCA':'S','TCG':'S','CCT':'P','CCC':'P','CCA':'P','CCG':'P',\n 'ACT':'T','ACC':'T','ACA':'T','ACG':'T','GCT':'A','GCC':'A','GCA':'A','GCG':'A',\n 'TAT':'Y','TAC':'Y','TAA':'*','TAG':'*','CAT':'H','CAC':'H','CAA':'Q','CAG':'Q',\n 'AAT':'N','AAC':'N','AAA':'K','AAG':'K','GAT':'D','GAC':'D','GAA':'E','GAG':'E',\n 'TGT':'C','TGC':'C','TGA':'*','TGG':'W','CGT':'R','CGC':'R','CGA':'R','CGG':'R',\n 'AGT':'S','AGC':'S','AGA':'R','AGG':'R','GGT':'G','GGC':'G','GGA':'G','GGG':'G'}\ndef tr(s): return \"\".join(code.get(s[i:i+3],'X') for i in range(0,len(s)-2,3))\n\nkd={'A':1.8,'R':-4.5,'N':-3.5,'D':-3.5,'C':2.5,'Q':-3.5,'E':-3.5,'G':-0.4,'H':-3.2,\n    'I':4.5,'L':3.8,'K':-3.9,'M':1.9,'F':2.8,'P':-1.6,'S':-0.8,'T':-0.7,'W':-0.9,\n    'Y':-1.3,'V':4.2}\n\nprot = tr(seq[270:1161])[:-1]  # drop stop\nprint(\"main ORF length aa:\", len(prot))\nwin=19\nvals=[]\nfor i in range(len(prot)-win+1):\n    vals.append(sum(kd[c] for c in prot[i:i+win])/win)\n# find runs above 1.6 -> TM candidates\nthr=1.6\nruns=[]\ni=0\nwhile i<len(vals):\n    if vals[i]>thr:\n        j=i\n        while j<len(vals) and vals[j]>thr: j+=1\n        if j-i>=2:\n            runs.append((i+1, i+win, max(vals[i:j])))\n        i=j\n    else: i+=1\nprint(\"Predicted hydrophobic/TM segments (19-aa window, KD>1.6):\")\nfor a,b,m in runs:\n    print(f\"   aa {a}-{b}  (max KD {m:.2f})\")\nprint(\"number of segments:\", len(runs))\n\n# amino acid composition of main protein\nfrom collections import Counter\nc=Counter(prot)\nprint(\"\\nmain protein aa composition (top):\", c.most_common())\nhydrophobic=sum(c[x] for x in \"AILMFWVY\")\nprint(\"hydrophobic fraction: %.2f\" % (hydrophobic/len(prot)))\n"
+      },
+      "is_error": false,
+      "output_chars": 609,
+      "nt_run": 0
+    },
+    {
+      "turn": 6,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\nn=len(seq)\ncomp=str.maketrans(\"ACGT\",\"TGCA\")\ndef rc(s): return s.translate(comp)[::-1]\n\ndef find_orfs(s, minaa=60):\n    res=[]\n    for frame in range(3):\n        start=None; pos=frame\n        while pos+3<=n:\n            cod=s[pos:pos+3]\n            if cod==\"ATG\" and start is None: start=pos\n            if cod in (\"TAA\",\"TAG\",\"TGA\"):\n                if start is not None:\n                    if (pos-start)//3>=minaa: res.append((start,pos+3))\n                    start=None\n            pos+=3\n        if start is not None and (len(s)-start)//3>=minaa:\n            res.append((start,len(s)))\n    return res\n\nprint(\"ORFs >=60 aa (forward coordinates, strand):\")\nrows=[]\nfor a,b in find_orfs(seq):\n    rows.append((a,b,'+'))\nr=rc(seq)\nfor a,b in find_orfs(r):\n    fa,fb=n-b,n-a\n    rows.append((fa,fb,'-'))\nfor fa,fb,st in sorted(rows):\n    print(f\"  {fa+1:5d}-{fb:5d} ({fb-fa:4d} nt, {(fb-fa)//3:3d} aa)  strand {st}\")\n\nprint(\"\\nFine GC (100-bp windows, only window start shown for 1100-2100):\")\nfor i in range(1100,2100,100):\n    w=seq[i:i+100]; print(f\"  {i+1:5d}-{i+100:5d}  GC={(w.count('G')+w.count('C'))/100:.2f}\")\n\n# long direct repeats (>=40bp exact duplicates)\nprint(\"\\nExact duplicate segments >=40 bp:\")\nseen={}\nfor i in range(n):\n    k=seq[i:i+40]\n    if len(k)<40: break\n    if k in seen:\n        print(\"  \", seen[k]+1, \"and\", i+1, k[:20]+\"...\")\n    else:\n        seen[k]=i\n"
+      },
+      "is_error": false,
+      "output_chars": 795,
+      "nt_run": 0
+    },
+    {
+      "turn": 7,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\nn=len(seq); comp=str.maketrans(\"ACGT\",\"TGCA\")\ndef rc(s): return s.translate(comp)[::-1]\n\n# broad inverted repeat search, stem >=15, any loop\nbest=[]\nfor i in range(n):\n    for L in (20,18,16,15):\n        if i+L>n: break\n        stem=seq[i:i+L]\n        target=rc(stem)\n        pos=seq.find(target,i+L)\n        if pos!=-1:\n            best.append((i+1,i+L,pos+1,pos+L,L))\n            break\nprint(\"Inverted repeats stem>=15 (pos1,pos2,len) - first 20:\")\nfor b in best[:20]: print(\"  \",b)\nprint(\"total:\",len(best))\n\n# strand skew per block\nfor name,(a,b) in [(\"1-1200\",(0,1200)),(\"1200-2030\",(1199,2030)),(\"2030-3000\",(2029,3000))]:\n    w=seq[a:b]\n    A,C,G,T=w.count('A'),w.count('C'),w.count('G'),w.count('T')\n    print(f\"{name}: GC={(G+C)/len(w):.3f}  A={A} T={T} G={G} C={C}  AT-skew={(A-T)/(A+T):+.3f} GC-skew={(G-C)/(G+C):+.3f}\")\n"
+      },
+      "is_error": false,
+      "output_chars": 288,
+      "nt_run": 0
+    }
+  ],
+  "turns": [
+    {
+      "input_tokens": 2055,
+      "output_tokens": 258,
+      "cached_tokens": 2048,
+      "tool_calls": 2,
+      "seconds": 2.6
+    },
+    {
+      "input_tokens": 2410,
+      "output_tokens": 376,
+      "cached_tokens": 2048,
+      "tool_calls": 1,
+      "seconds": 4.2
+    },
+    {
+      "input_tokens": 3085,
+      "output_tokens": 1132,
+      "cached_tokens": 2304,
+      "tool_calls": 1,
+      "seconds": 7.2
+    },
+    {
+      "input_tokens": 4595,
+      "output_tokens": 4593,
+      "cached_tokens": 3072,
+      "tool_calls": 1,
+      "seconds": 29.4
+    },
+    {
+      "input_tokens": 9719,
+      "output_tokens": 2119,
+      "cached_tokens": 4480,
+      "tool_calls": 1,
+      "seconds": 13.2
+    },
+    {
+      "input_tokens": 12383,
+      "output_tokens": 4862,
+      "cached_tokens": 9600,
+      "tool_calls": 1,
+      "seconds": 31.5
+    },
+    {
+      "input_tokens": 17549,
+      "output_tokens": 2865,
+      "cached_tokens": 12288,
+      "tool_calls": 1,
+      "seconds": 20.8
+    },
+    {
+      "input_tokens": 20791,
+      "output_tokens": 3083,
+      "cached_tokens": 17536,
+      "tool_calls": 1,
+      "seconds": 21.4
+    },
+    {
+      "input_tokens": 24032,
+      "output_tokens": 3205,
+      "cached_tokens": 20736,
+      "tool_calls": 0,
+      "seconds": 20.9
+    }
+  ],
+  "request_ids": [
+    "021791243858050b52b40748efca76dec1583940832f7e428fc14",
+    "0217912438606273c1f91f892e9aff2a902d86b047fe242aab367",
+    "0217912438650266362ddeee9049477b0b29b68d55a9ae9c56bfa",
+    "02179124387216734cb6184a92ddd9ae87302c189a666e5981c8c",
+    "021791243901660c195b830dbec85207d05ecc18a972ce68b4453",
+    "0217912439148537f903ef278210a935664acc7f34a222442e659",
+    "0217912439474285482bcf7e80bfa8bf500513aca3a704da3a7a8",
+    "021791243968288d5288a603f9a5ec332174783e04745d2bc79ab",
+    "0217912439886852e03d1d5cb4d12864ab68947fc6ea2073e2a38"
+  ],
+  "served_models": [
+    "deepseek-v4.1-flash"
+  ],
+  "input_tokens": 96619,
+  "output_tokens": 22493,
+  "cached_tokens": 74112,
+  "status": "end_turn",
+  "forced_report": false,
+  "refusal_category": null,
+  "report": "## Report on `region_009` (3,000 bp)\n\n**Overall composition.** The fragment is 3,000 bp with an average GC content of **46.3%** (A 743, C 681, G 709, T 867). It is clearly *not* compositionally uniform, and it is gene-dense \u2014 both features stand out.\n\n**1. Striking regional GC heterogeneity (most notable feature).**\nSliding-window analysis splits the fragment into three blocks:\n\n| Segment (1-based) | GC |\n|---|---|\n| 1 \u2013 ~1,200 | ~50% |\n| **~1,200 \u2013 ~2,030** | **~34% (AT-rich; lowest 100-bp window 1,301\u20131,400 = 26% GC)** |\n| ~2,030 \u2013 3,000 | ~53% |\n\nThe central AT-rich block spans roughly **1,200\u20132,030** and deviates from the fragment mean by ~7 SD \u2014 far too large to be chance for a ~830-bp stretch. This kind of discrete AT-rich island between GC-richer neighbors is the classic compositional signature of an atypical, possibly horizontally acquired segment (e.g., a genomic/mobile-element island). Notably, the block is AT-rich even though the GC-rich 5\u2032 segment also encodes a highly hydrophobic protein, so the anomaly is not simply explained by protein hydrophobicity.\n\n**2. Gene-dense, coding-like organisation.**\nI find long ORFs on both strands, several of them overlapping (e.g. a + strand ORF at 2,257\u20132,526 overlaps a \u2212 strand ORF at 2,073\u20132,675) \u2014 the sort of compact arrangement typical of dense genomes (phages, plasmids, islands). ORFs \u2265~60 aa (coordinates 1-based, given strand):\n\n| Coordinates | Length | Strand |\n|---|---|---|\n| 20 \u2013 214 | 195 nt (64 aa) | + |\n| **271 \u2013 1,161** | **891 nt (296 aa)** | **+ (longest)** |\n| 994 \u2013 1,221 | 228 nt (75 aa) | \u2212 |\n| 1,220 \u2013 1,636 | 417 nt (138 aa) | + |\n| 1,650 \u2013 2,030 | 381 nt (126 aa) | + |\n| 2,073 \u2013 2,675 | 603 nt (200 aa) | \u2212 |\n| 2,257 \u2013 2,526 | 270 nt (89 aa) | + |\n| 2,526 \u2013 2,966 | 441 nt (146 aa) | + |\n| 2,648 \u2013 2,950 | 303 nt (100 aa) | \u2212 |\n| 2,744 \u2013 3,000 | 257 nt (85 aa) | + (runs to fragment end; possibly truncated) |\n\nThe two AT-rich ORFs (**1,220\u20131,636** and **1,650\u20132,030**) roughly coincide with the AT-rich block, so the compositional anomaly is concentrated in that gene pair.\n\n**3. Longest ORF encodes a putative membrane protein.**\nThe 271\u20131,161 (+) product (296 aa) is 61% hydrophobic and contains ~**8** hydrophobic stretches of ~19 aa above a Kyte\u2013Doolittle threshold, the hallmark of a polytopic integral membrane protein (transporter/receptor-like). The proteins from 1,220\u20131,636 and 1,650\u20132,030 are likewise hydrophobic and membrane-protein-like, as is the 2,073\u20132,675 (\u2212) product.\n\n**4. No repeat structure.**\nNo tandem repeats (\u22654 units), no exact direct repeats \u226540 bp, and no perfect inverted repeats \u226515 bp were detected.\n\n**Bottom line / caveat.**\nTwo things genuinely stand out: (i) a discrete **AT-rich island at approximately 1,200\u20132,030** (~34% GC vs ~50\u201353% flanks), and (ii) a **gene-dense, partly overlapping ORF layout**, whose longest member (271\u20131,161, +) is predicted to be a multi-spanning membrane protein. These are intrinsic sequence features. I did **not** run any database/homology search, so I can *not* assign the region a specific identity or function \u2014 any gene name would be speculation. If you want a functional assignment, the next step is a BLAST/hmmsearch of the ORFs above against a protein database.",
+  "nt_run_from_tools": 0,
+  "seen_intervals": [],
+  "tool_errors": 0,
+  "seconds": 151.6,
+  "provider": "opencode-go",
+  "rep": 1,
+  "claims": {
+    "features": [
+      {
+        "type": "other",
+        "start": 1200,
+        "end": 2030,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "AT-rich island (~34% GC)"
+      },
+      {
+        "type": "other",
+        "start": 1301,
+        "end": 1400,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "lowest GC 100-bp window (26% GC)"
+      },
+      {
+        "type": "other",
+        "start": null,
+        "end": null,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "gene-dense overlapping ORF arrangement"
+      },
+      {
+        "type": "gene",
+        "start": 20,
+        "end": 214,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "ORF 64 aa (+ strand)"
+      },
+      {
+        "type": "gene",
+        "start": 271,
+        "end": 1161,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "longest ORF, putative polytopic membrane protein (296 aa, +)"
+      },
+      {
+        "type": "gene",
+        "start": 994,
+        "end": 1221,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "ORF 75 aa (- strand)"
+      },
+      {
+        "type": "gene",
+        "start": 1220,
+        "end": 1636,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "hydrophobic membrane-protein-like ORF (138 aa, +)"
+      },
+      {
+        "type": "gene",
+        "start": 1650,
+        "end": 2030,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "hydrophobic membrane-protein-like ORF (126 aa, +)"
+      },
+      {
+        "type": "gene",
+        "start": 2073,
+        "end": 2675,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "hydrophobic membrane-protein-like ORF (200 aa, -)"
+      },
+      {
+        "type": "gene",
+        "start": 2257,
+        "end": 2526,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "ORF 89 aa (+ strand)"
+      },
+      {
+        "type": "gene",
+        "start": 2526,
+        "end": 2966,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "ORF 146 aa (+ strand)"
+      },
+      {
+        "type": "gene",
+        "start": 2648,
+        "end": 2950,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "ORF 100 aa (- strand)"
+      },
+      {
+        "type": "gene",
+        "start": 2744,
+        "end": 3000,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "ORF 85 aa (+ strand, possibly truncated)"
+      }
+    ],
+    "named_identity": []
+  },
+  "judge_model": "kimi-k2.7-code"
+}

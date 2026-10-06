@@ -1,0 +1,281 @@
+{
+  "locus": "locus_008",
+  "condition": "file",
+  "model": "deepseek-v4.1-flash",
+  "effort": null,
+  "read_default": 2000,
+  "tool_calls": [
+    {
+      "name": "list_files",
+      "input": {},
+      "is_error": false,
+      "output_chars": 17,
+      "nt_run": 0
+    },
+    {
+      "name": "read_file",
+      "input": {
+        "path": "region.fasta",
+        "length": 2000
+      },
+      "is_error": false,
+      "output_chars": 2028,
+      "nt_run": 1961
+    },
+    {
+      "name": "read_file",
+      "input": {
+        "path": "region.fasta",
+        "offset": 2000,
+        "length": 1200
+      },
+      "is_error": false,
+      "output_chars": 1085,
+      "nt_run": 1039
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\"\nwith open(\"region.fasta\") as f:\n    lines = f.read().splitlines()\nheader = lines[0]\nseq = \"\".join(l.strip() for l in lines[1:])\nprint(\"header:\", header)\nprint(\"length:\", len(seq))\nprint(\"GC:\", round(100*(seq.count(\"G\")+seq.count(\"C\"))/len(seq),2))\nprint(\"counts:\", {b: seq.count(b) for b in \"ACGT\"})\nprint(\"other chars:\", set(seq) - set(\"ACGT\"))\n# case check\nprint(\"lowercase present:\", any(c.islower() for c in seq))\n"
+      },
+      "is_error": false,
+      "output_chars": 135,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\n\n# Look for repeated substrings\nfrom collections import Counter\n# find long repeated k-mers\ndef repeats(seq, k):\n    c = Counter(seq[i:i+k] for i in range(len(seq)-k+1))\n    return [(km, n) for km,n in c.items() if n>1]\n\nfor k in (10, 12, 15, 18, 20, 25, 30):\n    r = repeats(seq, k)\n    # sort by count\n    r.sort(key=lambda x:-x[1])\n    print(k, \"num repeat families:\", len(r), r[:5])\n"
+      },
+      "is_error": false,
+      "output_chars": 1003,
+      "nt_run": 30
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\n\nimport re\ndef find_all(sub):\n    return [m.start() for m in re.finditer(\"(?=\"+sub+\")\", seq)]\n\nfor motif in [\"TGGCATTACCTCC\", \"TTTGCTTCGTGGCATTACCTCCGCCTCCTA\", \"GCTTCGTGGCATTACC\",\n              \"TTGCTTCGTGGCATTACCTCC\"]:\n    print(motif, len(motif), find_all(motif))\n"
+      },
+      "is_error": false,
+      "output_chars": 202,
+      "nt_run": 30
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\n\n# Core motif analysis: extract the region and see structure\nstart=seq.find(\"TTTGCTTCGTGGCATTACCTCCGCCTCCTA\")\nprint(\"first occurrence of 30mer at\", start)\n# print region around 1880-2320\nprint(seq[1860:2340])\n"
+      },
+      "is_error": false,
+      "output_chars": 515,
+      "nt_run": 480
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\ncomp = {\"A\":\"T\",\"C\":\"G\",\"G\":\"C\",\"T\":\"A\"}\ndef rc(s): return \"\".join(comp[c] for c in reversed(s))\n\n# ORF scan both strands\ndef orfs(s, min_aa=50):\n    res=[]\n    for strand, sq in ((\"+\", s), (\"-\", rc(s))):\n        for frame in range(3):\n            i=frame\n            while i < len(sq)-2:\n                if sq[i:i+3]==\"ATG\":\n                    j=i\n                    while j < len(sq)-2:\n                        if sq[j:j+3] in (\"TAA\",\"TAG\",\"TGA\"):\n                            break\n                        j+=3\n                    aa=(j-i)//3\n                    if aa>=min_aa:\n                        res.append((strand, i if strand==\"+\" else len(sq)-j, aa, j-i))\n                    i=j\n                i+=3\n    return res\n\nfor r in sorted(orfs(seq, 40), key=lambda x:-x[2]):\n    print(r)\n"
+      },
+      "is_error": false,
+      "output_chars": 248,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\ncomp = {\"A\":\"T\",\"C\":\"G\",\"G\":\"C\",\"T\":\"A\"}\ndef rc(s): return \"\".join(comp[c] for c in reversed(s))\n\n# Inverted repeat / palindrome search: find arms >=12 whose reverse complement matches elsewhere\nn=len(seq)\nminarm=12\nhits=[]\nfor L in range(minarm, 31, 3):\n    for i in range(n-L+1):\n        arm=seq[i:i+L]\n        rcarm=rc(arm)\n        j=seq.find(rcarm, i+L)\n        if j!=-1:\n            hits.append((L,i,j))\n# report best (largest arm)\nhits.sort(key=lambda x:-x[0])\nprint(\"top inverted-repeat pairs (armlen, posA, posB):\")\nfor h in hits[:15]:\n    print(h)\n"
+      },
+      "is_error": false,
+      "output_chars": 48,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\nn=len(seq)\n\n# self-alignment dot plot: find maximal diagonal matches with windows\ndef dotplot(seq, w=20, step=5):\n    hits=[]\n    for i in range(0, n-w, step):\n        for j in range(i+20, n-w, step):\n            if seq[i:i+w]==seq[j:j+w]:\n                hits.append((i,j))\n    return hits\n\nhits = dotplot(seq)\n# cluster: group by diagonal offset j-i\nfrom collections import defaultdict\nprint(\"num matching windows:\", len(hits))\n# merge nearby windows into segments\nhits.sort()\nsegs=[]\nfor (i,j) in hits:\n    if segs and i-segs[-1][0][1]<=15 and j-segs[-1][1][1]<=15:\n        segs[-1][0].append(i); segs[-1][1].append(j)\n    else:\n        segs.append(([i],[j]))\nfor a,b in segs:\n    if max(b)-min(a) != max(a)-min(b) if False else True:\n        pass\nfor a,b in segs:\n    print(f\"A {min(a)}-{max(a)}  B {min(b)}-{max(b)}  (offset {min(b)-min(a)})\")\n"
+      },
+      "is_error": false,
+      "output_chars": 145,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\nfrom collections import defaultdict\nd=defaultdict(list)\nk=20\nfor i in range(len(seq)-k+1):\n    d[seq[i:i+k]].append(i)\n# keep repeat families, cluster positions\nfam=[(km,pos) for km,pos in d.items() if len(pos)>1]\nfam.sort(key=lambda x:min(x[1]))\nseen=set()\nfor km,pos in fam:\n    key=min(pos)\n    print(km, pos)\n"
+      },
+      "is_error": false,
+      "output_chars": 678,
+      "nt_run": 20
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\nstart=1660; end=2280\nfor p in range(start,end,60):\n    print(f\"{p:5d} {seq[p:p+60]}\")\n"
+      },
+      "is_error": false,
+      "output_chars": 737,
+      "nt_run": 60
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\ncomp={\"A\":\"T\",\"C\":\"G\",\"G\":\"C\",\"T\":\"A\"}\ndef rc(s): return \"\".join(comp[c] for c in reversed(s))\ncodon={}\nbases=\"TCAG\"\naas=\"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\ni=0\nfor a in bases:\n    for b in bases:\n        for c in bases:\n            codon[a+b+c]=aas[i]; i+=1\ndef translate(s):\n    return \"\".join(codon.get(s[i:i+3],\"?\") for i in range(0,len(s)-2,3))\n\n# ORF found at +1993 length 474\norf = seq[1993:1993+474]\nprint(\"ORF 1993-2467 (+), 474 nt, 157 aa + stop\")\nprint(translate(orf))\nprint(\"stop codon:\", seq[1993+474:1993+477])\n# composition\nfrom collections import Counter\nprot=translate(orf)\nprint(\"AA composition:\", Counter(prot).most_common())\n"
+      },
+      "is_error": false,
+      "output_chars": 429,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\nimport re\n# occurrences of the core motif variants\ncore = \"GCATTACCTCC\"\nprint(\"core '%s' occurrences:\"%core, [m.start() for m in re.finditer(\"(?=\"+core+\")\", seq)])\nprint(\"count:\", len(re.findall(core, seq)))\n\n# Build alignment of repeat copies: take windows around each core occurrence\npositions = [m.start() for m in re.finditer(\"(?=\"+core+\")\", seq)]\nfor p in positions:\n    print(p, seq[p-25:p+30])\n"
+      },
+      "is_error": false,
+      "output_chars": 444,
+      "nt_run": 55
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nimport random\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\n# longest ORF length distribution in random seqs of length 3000 with same composition\ncodon={}\nbases=\"TCAG\"; aas=\"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\ni=0\nfor a in bases:\n    for b in bases:\n        for c in bases:\n            codon[a+b+c]=aas[i]; i+=1\ncomp={\"A\":\"T\",\"C\":\"G\",\"G\":\"C\",\"T\":\"A\"}\ndef rc(s): return \"\".join(comp[c] for c in reversed(s))\n\ndef longest_orf(s):\n    best=0; bestinfo=None\n    for strand, sq in ((\"+\", s), (\"-\", rc(s))):\n        for f in range(3):\n            i=f\n            while i < len(sq)-2:\n                if sq[i:i+3]==\"ATG\":\n                    j=i\n                    while j<len(sq)-2 and sq[j:j+3] not in (\"TAA\",\"TAG\",\"TGA\"):\n                        j+=3\n                    aa=(j-i)//3\n                    if aa>best:\n                        best=aa; bestinfo=(strand,i,aa)\n                    i=j\n                i+=3\n    return best,bestinfo\n\nprint(\"observed:\", longest_orf(seq))\n\n# simulate preserving composition\nletters = list(seq)\nvals=[]\nrandom.seed(0)\nfor t in range(2000):\n    random.shuffle(letters)\n    v,_=longest_orf(\"\".join(letters))\n    vals.append(v)\nvals.sort()\nprint(\"random longest ORF: mean %.1f  median %d  95th %d  max %d\"%(sum(vals)/len(vals), vals[len(vals)//2], vals[int(0.95*len(vals))], vals[-1]))\nprint(\"fraction >= observed:\", sum(1 for v in vals if v>=157)/len(vals))\n"
+      },
+      "is_error": false,
+      "output_chars": 125,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\n\n# align successive ~64 bp units in the tandem part\nfor s in (1703,1767,1831,1895):\n    print(s, seq[s:s+66])\nprint()\n# divergent copies\nfor s in (2054,2206):\n    print(s, seq[s:s+66])\nprint()\n# search looser core to catch the divergent 1960 copy\nimport re\nfor pat in [\"G..TTACCT.G\",\"GCATTACCT\",\"GTCATTACCT\"]:\n    print(pat, [m.start() for m in re.finditer(\"(?=\"+pat+\")\", seq)])\n"
+      },
+      "is_error": false,
+      "output_chars": 520,
+      "nt_run": 66
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\n# autocorrelation in the tandem window to find period\nimport re\nwin = seq[1690:1990]\nbest=[]\nfor period in range(20,120):\n    score=0\n    for i in range(len(win)-period):\n        if win[i]==win[i+period]: score+=1\n    best.append((score/(len(win)-period), period))\nbest.sort(reverse=True)\nprint(\"period, identity\")\nfor frac,p in best[:8]:\n    print(p, round(frac,3))\n"
+      },
+      "is_error": false,
+      "output_chars": 90,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\npositions=[1706,1770,1838,1901,2056,2208]\nfor p in positions:\n    print(p, seq[p-14:p+34])\n"
+      },
+      "is_error": false,
+      "output_chars": 324,
+      "nt_run": 48
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\nimport re\n# approximate search for the repeat with mismatches using a regex on the 30 bp consensus\nconsensus = \"TTTGCTTCGTGGCATTACCTCCGCCTCCTATCAA\"   # 35-mer\n# build regex allowing mismatches via bitap-ish: just use hamming scan of all windows\ndef scan(seq, pat, maxmm):\n    hits=[]\n    L=len(pat)\n    for i in range(len(seq)-L+1):\n        mm=sum(1 for a,b in zip(seq[i:i+L],pat) if a!=b)\n        if mm<=maxmm:\n            hits.append((i,mm))\n    return hits\nfor mm in (5,7):\n    h=scan(seq,consensus,mm)\n    # merge overlapping\n    print(\"maxmm\",mm,\"n=\",len(h))\n    # merge hits within 20 bp\n    merged=[]\n    for i,m in h:\n        if merged and i-merged[-1][0]<=15:\n            if m<merged[-1][1]: merged[-1]=(i,m)\n        else:\n            merged.append((i,m))\n    print([x for x in merged])\n"
+      },
+      "is_error": false,
+      "output_chars": 171,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\nimport re\n# homopolymer runs\nfor base in \"ACGT\":\n    for m in re.finditer(base+\"{\"+str(5)+\",}\", seq):\n        print(\"run\", base, seq[m.start():m.end()], \"len\", m.end()-m.start(), \"at\", m.start())\nprint(\"---- short tandem repeats (period 2-6, >=4 units) ----\")\nfor period in range(2,7):\n    for i in range(len(seq)-period*4+1):\n        unit=seq[i:i+period]\n        n=1\n        j=i+period\n        while seq[j:j+period]==unit:\n            n+=1; j+=period\n        if n>=4:\n            print(\"period\",period,\"unit\",unit,\"copies\",n,\"at\",i)\n    # dedupe noise by continuing\n"
+      },
+      "is_error": false,
+      "output_chars": 295,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\ncomp={\"A\":\"T\",\"C\":\"G\",\"G\":\"C\",\"T\":\"A\"}\ndef rc(s): return \"\".join(comp[c] for c in reversed(s))\n# inverted repeats with <=2 mismatches, arms 8-20, loop >=0\nn=len(seq)\nres=[]\nfor L in range(10,25):\n    for i in range(n-L+1):\n        arm=seq[i:i+L]\n        r=rc(arm)\n        for j in range(i+L, n-L+1):\n            mm=sum(1 for a,b in zip(seq[j:j+L], r) if a!=b)\n            if mm<=2:\n                res.append((L,mm,i,j,j-i))\nres.sort(key=lambda x:(-x[0],x[1]))\nfor x in res[:10]:\n    print(\"armlen\",x[0],\"mm\",x[1],\"posA\",x[2],\"posB\",x[3],\"loop\",x[4]-x[0])\n"
+      },
+      "is_error": false,
+      "output_chars": 26,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\n# GC profile per 100 bp\nfor i in range(0,len(seq),250):\n    w=seq[i:i+250]\n    gc=100*(w.count(\"G\")+w.count(\"C\"))/len(w)\n    print(f\"{i:4d}-{min(i+250,len(seq)):4d}  GC={gc:5.1f}%  {'#'*int(gc/2)}\")\n"
+      },
+      "is_error": false,
+      "output_chars": 586,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\ncomp={\"A\":\"T\",\"C\":\"G\",\"G\":\"C\",\"T\":\"A\"}\ndef rc(s): return \"\".join(comp[c] for c in reversed(s))\nfrom collections import defaultdict\nfor L in (10,12,14,16,18,20):\n    d=defaultdict(list)\n    for i in range(len(seq)-L+1):\n        d[seq[i:i+L]].append(i)\n    found=[]\n    for arm in list(d):\n        r=rc(arm)\n        if r in d and arm<=r:\n            for i in d[arm]:\n                for j in d[r]:\n                    if j>=i+L:\n                        found.append((arm,i,j,j-i-L))\n    print(\"L=%d perfect inverted arms: %d\"%(L,len(found)))\n    for f in found[:6]:\n        print(\"   \",f)\n"
+      },
+      "is_error": false,
+      "output_chars": 289,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\npos=[1695,1759,1827,1890,1961,2045,2128,2197]\nwin=[seq[p:p+44] for p in pos]\nfor p,w in zip(pos,win):\n    print(f\"{p:5d} {w}\")\n# column consensus (majority base, ignoring gaps since same length)\ncons=[]\nfor c in range(44):\n    col=[w[c] for w in win]\n    from collections import Counter\n    b,_=Counter(col).most_common(1)[0]\n    cons.append(b)\ncons=\"\".join(cons)\nprint(\"cons \",cons)\n# pairwise identity matrix\nprint(\"pairwise identities (%):\")\nfor i in range(len(win)):\n    row=[]\n    for j in range(len(win)):\n        ident=100*sum(1 for a,b in zip(win[i],win[j]) if a==b)/44\n        row.append(f\"{ident:4.0f}\")\n    print(i, \" \".join(row))\nimport statistics\nids=[100*sum(1 for a,b in zip(win[i],win[j]) if a==b)/44 for i in range(len(win)) for j in range(i+1,len(win))]\nprint(\"mean pairwise identity: %.1f%%  min %.1f%%  max %.1f%%\"%(statistics.mean(ids),min(ids),max(ids)))\n"
+      },
+      "is_error": false,
+      "output_chars": 872,
+      "nt_run": 45
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nfrom collections import defaultdict\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\nk=20\nd=defaultdict(list)\nfor i in range(len(seq)-k+1):\n    d[seq[i:i+k]].append(i)\noutside=[]\nfor km,pos in d.items():\n    if len(pos)>1:\n        if min(pos)>2250 or max(pos)<1690:\n            outside.append((km,pos))\nprint(\"repeat families fully OUTSIDE 1690-2250:\", len(outside))\nfor x in outside[:10]: print(x)\n\n# Also check for inverse-complement repeat families (palindromes dispersed)\nprint()\nprint(\"no further work\")\n"
+      },
+      "is_error": false,
+      "output_chars": 60,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\").read().splitlines()[1:])\n# CpG observed/expected\ndef cpg(s):\n    o=s.count(\"CG\")\n    e=s.count(\"C\")*s.count(\"G\")/len(s)\n    return o,e,o/e\nprint(\"whole:\", cpg(seq))\n# 1-based coordinates of the 8 repeat copies\npos0=[1695,1759,1827,1890,1961,2045,2128,2197]\nprint(\"repeat copy start coords (1-based):\", [p+1 for p in pos0])\nprint(\"array span (1-based):\", pos0[0]+1, \"-\", pos0[-1]+44)\nprint(\"spacings:\", [pos0[i+1]-pos0[i] for i in range(len(pos0)-1)])\n"
+      },
+      "is_error": false,
+      "output_chars": 200,
+      "nt_run": 0
+    }
+  ],
+  "request_ids": [
+    "021791239530921e142d87b6a9bdf1f5f94f64260ca2a937c2ef2",
+    "0217912395326308eedaf36e20f5141b2bc84e877dea1f7f6716b",
+    "021791239534462e3e9275467fdb9818f9fefcdf3ebba71d11255",
+    "02179123953881169d9f56ebaf8adc0cbe3483f4c0cffb8a1b0ea",
+    "02179123954206245ed1e5750293ff098e8b34eca79d24a79efdc",
+    "02179123954758322877b9ff06629ca98d99f0267ba452b63fef8",
+    "0217912395551679e89f26b858b9d25ce524a85522bfdafb7896d",
+    "021791239558107c891133c7aa592195d19c3080f8a135d85556d",
+    "0217912395722218823a6d9d4020aa2a4c8e545461b44d5cddc08",
+    "021791239586383f5fadfdc607fef478c6f908597481cce38fec7",
+    "0217912395950883a96cb89bb0639877068f7507e34a86a8f111a",
+    "02179123960423045c07e4ff35b1f55227084b3d76e9a80f4e018",
+    "021791239642705641a02d40a43d449f07de84c480b390d6bedc9",
+    "0217912396497476438f8a7da3edc67692fae0fdfd3f961cb838e",
+    "02179123965511822877b9ff06629ca98d99f0267ba452ba96176",
+    "0217912396678386ac55f1ae722766e84a3a1d53b37ba2d9a8e49"
+  ],
+  "input_tokens": 146402,
+  "output_tokens": 14764,
+  "status": "end_turn",
+  "forced_report": false,
+  "refusal_category": null,
+  "report": "## Report: `region.fasta` (record `locus_008`)\n\n**Basic properties**\n- 3,000 bp, single sequence, no ambiguity codes (pure A/C/G/T), no soft\u2011masking.\n- G+C = 52.3 % (A 691, C 855, G 713, T 741); GC is fairly uniform across the molecule (47\u201356 % in 250\u2011bp windows), so there is no compositionally distinct \"island\" region.\n- CpG observed/expected \u2248 0.94 \u2014 unremarkable.\n\n**No convincing protein\u2011coding gene**\n- The longest open reading frame (ATG \u2192 stop) is only 158 codons, on the + strand at nt 1993\u20132467. A composition\u2011matched randomisation test (2,000 shuffles) gives a 95th percentile of ~159 codons, i.e. an ORF this long arises by chance frequently (p \u2248 0.06). All other ORFs are \u2264 88 codons. There is therefore no statistical support for a coding sequence in this region.\n\n**Main notable feature \u2014 an imperfect tandem repeat array (~nt 1696\u20132241)**\nThe sequence contains a conspicuous cluster of **eight direct (same\u2011orientation) copies** of a ~40 bp repeat unit:\n\n| copy | 5\u2032 start (1\u2011based) |\n|---|---|\n| 1 | 1696 |\n| 2 | 1760 |\n| 3 | 1828 |\n| 4 | 1891 |\n| 5 | 1962 |\n| 6 | 2046 |\n| 7 | 2129 |\n| 8 | 2198 |\n\n- Spacing between copy starts: 64, 68, 63, 71, 84, 83, 69 bp \u2192 the array behaves like a tandem repeat with a unit length of ~63\u201384 bp (mean ~72 bp), spanning **nt 1696\u20132241 (~545 bp)**.\n- Copies are clearly homologous but degenerated: mean pairwise identity \u2248 **69 %** (range 61\u201380 %) over the aligned 44 bp window \u2014 i.e. a diverged, imperfect repeat family rather than a clean satellite.\n- Majority\u2011rule consensus (35 bp): **5\u2032\u2011TTTGCTTCGTGGCATTACCTCCGCCTCCTATCAAT\u20113\u2032**, which is matched exactly by copy 4 (nt 1890\u20131924). The best\u2011conserved core is `GCTTCGTGGCATTACCTCC`; copy 5 (nt ~1962) is the most divergent (`\u2026GTCATTACCTGCG\u2026`, disrupting the core).\n- All internally repeated 20\u2011mers in the whole 3,000 bp fall inside this one window \u2014 the array is the only repetitive structure in the sequence.\n- A side observation: in one reading frame the repeat's `CCTCCGCCTCCT` tract translates as a run of prolines (\u2026P\u2011P\u2011P\u2011P\u2026), and in the +1993 frame the `TGGCATTACCT` core yields a repeated `WHYL` peptide motif. This is a trivial consequence of the DNA repeat and not evidence of a real repeat\u2011protein gene.\n\n**Nothing else stands out**\n- No homopolymer tracts longer than 5 bp (all \u22655 runs are single occurrences: CCCCC \u00d75, GGGGG \u00d72, TTTTT \u00d71).\n- No microsatellite/simple\u2011sequence repeats other than the `(CCT)\u2084` run inside the array itself (nt ~2214).\n- No significant inverted repeats: the longest perfect palindromic arm is only 10 bp and there are just three such sites (127/2919, 1240/2518, 1447/2319) \u2014 exactly the number expected by chance, so no hairpin/cruciform\u2011forming structure.\n\n**Summary / conclusion**\nBeyond being a 3 kb, 52 % GC fragment with no credible coding capacity, the single feature worth flagging is the imperfect 8\u2011copy tandem repeat array occupying roughly **nt 1696\u20132241**, built from a ~40 bp unit (consensus `TTTGCTTCGTGGCATTACCTCCGCCTCCTATCAAT`) at ~69 % inter\u2011copy identity. Its dispersed, degenerated character is consistent with a low\u2011complexity/repeat\u2011derived region of the kind often found in non\u2011coding or transposon\u2011associated DNA, but the data here cannot assign it to any known repeat family. Everything else in the sequence looks statistically unremarkable.",
+  "nt_run_from_tools": 1961,
+  "provider": "opencode-go",
+  "rep": 1,
+  "claims": {
+    "claims_repeat_array": true,
+    "unit_length": 40,
+    "copy_number": 8,
+    "start": 1696,
+    "end": 2241,
+    "supporting_quote": "The sequence contains a conspicuous cluster of eight direct (same-orientation) copies of a ~40 bp repeat unit",
+    "other_notable_features": []
+  },
+  "judge_model": "kimi-k2.7-code"
+}

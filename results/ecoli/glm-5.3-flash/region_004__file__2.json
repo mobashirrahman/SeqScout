@@ -1,0 +1,416 @@
+{
+  "started_at": "2026-10-05T23:31:44+00:00",
+  "prompt_hash": "6548b398e9a9",
+  "code_hash": "7c7d70e28d52",
+  "locus": "region_004",
+  "condition": "file",
+  "model": "glm-5.3-flash",
+  "effort": null,
+  "read_default": 2000,
+  "max_turns": 20,
+  "tool_calls": [
+    {
+      "turn": 0,
+      "name": "list_files",
+      "input": {},
+      "is_error": false,
+      "output_chars": 17,
+      "nt_run": 0
+    },
+    {
+      "turn": 0,
+      "name": "read_file",
+      "input": {
+        "path": "region.fasta"
+      },
+      "is_error": false,
+      "output_chars": 2028,
+      "nt_run": 1960
+    },
+    {
+      "turn": 1,
+      "name": "read_file",
+      "input": {
+        "length": 1100,
+        "path": "region.fasta",
+        "offset": 2000
+      },
+      "is_error": false,
+      "output_chars": 1086,
+      "nt_run": 1040
+    },
+    {
+      "turn": 2,
+      "name": "read_file",
+      "input": {
+        "path": "region.fasta"
+      },
+      "is_error": false,
+      "output_chars": 2028,
+      "nt_run": 1960
+    },
+    {
+      "turn": 3,
+      "name": "read_file",
+      "input": {
+        "offset": 1000,
+        "path": "region.fasta",
+        "length": 1500
+      },
+      "is_error": false,
+      "output_chars": 1531,
+      "nt_run": 1478
+    },
+    {
+      "turn": 4,
+      "name": "read_file",
+      "input": {
+        "path": "region.fasta",
+        "length": 700,
+        "offset": 2400
+      },
+      "is_error": false,
+      "output_chars": 686,
+      "nt_run": 645
+    },
+    {
+      "turn": 5,
+      "name": "run_python",
+      "input": {
+        "code": "with open('region.fasta','r') as f:\n    content = f.read()\n\n# Parse the FASTA\nlines = content.split('\\n')\nheader = None\ndata_parts = []\ncur_data = []\nfor l in lines:\n    if l.startswith('>'):\n        if header is not None:\n            data_parts.append(cur_data)\n        header = l\n        cur_data = []\n    else:\n        cur_data.append(l)\ndev = ''.join(cur_data)\nprint(\"header:\", header)\nprint(\"full length:\", len(dev))\nprint(dev)\n"
+      },
+      "is_error": false,
+      "output_chars": 3039,
+      "nt_run": 3000
+    },
+    {
+      "turn": 6,
+      "name": "run_python",
+      "input": {
+        "code": "from collections import Counter\nimport re\n\nseq = open('region.fasta').read().split('\\n',1)[1].replace('\\n','')\nprint(len(seq))\nprint(\"base composition:\", Counter(seq))\nGC = sum(seq.count(b) for b in ['GC'])\ndef gc_count(s):\n    return sum(1 for c in s if c in 'GCgc')\nprint(\"gc_sum:\", gc_count(seq))\n\n# GC content in windows\nw = 100\ngcs = []\nfor i in range(0, len(seq), w):\n    win = seq[i:i+w]\n    gcs.append(round(sum(1 for c in win if c in 'GC')/len(win)*100,1))\nprint(\"GC by 100bp windows (1-based starts 1,101,...):\")\nfor idx,g in enumerate(gcs):\n    print(idx*w+1, g)\n"
+      },
+      "is_error": false,
+      "output_chars": 422,
+      "nt_run": 0
+    },
+    {
+      "turn": 7,
+      "name": "run_python",
+      "input": {
+        "code": "import re\nfrom collections import Counter\n\nseq = open('region.fasta').read().split('\\n',1)[1].replace('\\n','')\nseq_rc = seq.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\n\ncodon_table = {\n 'TTT':'F','TTC':'F','TTA':'L','TTG':'L','TCT':'S','TCC':'S','TCA':'S','TCG':'S',\n 'TAT':'Y','TAC':'Y','TAA':'*','TAG':'*','TGT':'C','TGC':'C','TGA':'*','TGG':'W',\n 'CTT':'L','CTC':'L','CTA':'L','CTG':'L','CCT':'P','CCC':'P','CCA':'P','CCG':'P',\n 'CAT':'H','CAC':'H','CAA':'Q','CAG':'Q','CGT':'R','CGC':'R','CGA':'R','CGG':'R',\n 'ATT':'I','ATC':'I','ATA':'I','ATG':'M','ACT':'T','ACC':'T','ACA':'T','ACG':'T',\n 'AAT':'N','AAC':'N','AAA':'K','AAG':'K','AGT':'S','AGC':'S','AGA':'R','AGG':'R',\n 'GTT':'V','GTC':'V','GTA':'V','GTG':'V','GCT':'A','GCC':'A','GCA':'A','GCG':'A',\n 'GAT':'D','GAC':'D','GAA':'E','GAG':'E','GGT':'G','GGC':'G','GGA':'G','GGG':'G'}\n\ndef translate(s, t=codon_table):\n    bad=0\n    aa=[]\n    for i in range(0,len(s)-len(s)%3,3):\n        c=t.get(s[i:i+3],'X')\n        if c=='X': bad+=1\n        aa.append(c)\n    return ''.join(aa), bad\n\ndef orfs(s, minlen=150):\n    stops = {'TAA','TAG','TGA'}\n    prots=[]\n    for strand,direction in [(s,'+'),(seq_rc,'-')]:\n        L=len(strand)\n        for frame in range(3):\n            i=frame\n            while i+3<=L:\n                if strand[i:i+3]=='ATG':\n                    j=i\n                    aa=[]\n                    while j+3<=L:\n                        c=strand[j:j+3]\n                        if c in stops:\n                            break\n                        aa.append(codon_table[c])\n                        j+=3\n                    if j+3<=L:  # ended at stop\n                        prot=''.join(aa)\n                        if len(prot)>=minlen:\n                            prots.append((direction,frame+1,i+1,j+3-1-2,prot,c))\n                    i=j+3\n                else:\n                    i+=3\n    return prots\n\nprots = orfs(seq, 100)\nprint(\"long ORFs (>=100 aa) with stop codon and ATG start:\")\nfor p in prots:\n    strand,frame,start,end,prot,stop = p\n    print(f\"  strand {'+' if strand=='+' else '-'} frame {frame}: nt {start}..{end}, len {len(prot)} aa (starts M, ends {stop})\")\n"
+      },
+      "is_error": false,
+      "output_chars": 184,
+      "nt_run": 0
+    },
+    {
+      "turn": 8,
+      "name": "run_python",
+      "input": {
+        "code": "seq = open('region.fasta').read().split('\\n',1)[1].replace('\\n','')\n\ncodon_table = {\n 'TTT':'F','TTC':'F','TTA':'L','TTG':'L','TCT':'S','TCC':'S','TCA':'S','TCG':'S',\n 'TAT':'Y','TAC':'Y','TAA':'*','TAG':'*','TGT':'C','TGC':'C','TGA':'*','TGG':'W',\n 'CTT':'L','CTC':'L','CTA':'L','CTG':'L','CCT':'P','CCC':'P','CCA':'P','CCG':'P',\n 'CAT':'H','CAC':'H','CAA':'Q','CAG':'Q','CGT':'R','CGC':'R','CGA':'R','CGG':'R',\n 'ATT':'I','ATC':'I','ATA':'I','ATG':'M','ACT':'T','ACC':'T','ACA':'T','ACG':'T',\n 'AAT':'N','AAC':'N','AAA':'K','AAG':'K','AGT':'S','AGC':'S','AGA':'R','AGG':'R',\n 'GTT':'V','GTC':'V','GTA':'V','GTG':'V','GCT':'A','GCC':'A','GCA':'A','GCG':'A',\n 'GAT':'D','GAC':'D','GAA':'E','GAG':'E','GGT':'G','GGC':'G','GGA':'G','GGG':'G'}\n\norf = seq[158-1:2851]  # nt 158..2851 (1-based), so offset 157\nprot=''\nfor i in range(0,len(orf),3):\n    prot += codon_table[orf[i:i+3]]\nprint(\"ORF length nt:\", len(orf), \"prot len:\", len(prot)-1)  # minus stop\n# protein without stop\nprot = prot[:-1]\nprint(\"protein aa:\", len(prot))\nprint(prot)\nprint()\nfrom collections import Counter\nprint(Counter(prot))\n"
+      },
+      "is_error": false,
+      "output_chars": 1140,
+      "nt_run": 0
+    },
+    {
+      "turn": 9,
+      "name": "run_python",
+      "input": {
+        "code": "import re\nfrom collections import Counter\n\n# Load standard codon table for matching UniProt-style sequences\nseq = open('region.fasta').read().split('\\n',1)[1].replace('\\n','')\n\n# Look for patterns in the protein: N-terminal, motifs\nprot = (\"MFKEIFTRLIRHLPSRLVHRDPLPGAQQTVNTVVPPSLSAHCLKMAVMPEEELWKTFDTHPEGLNQAEVESAREQHGENKLPAQQPSPWWVHLWVCYRNPFNILLTILGAISYATEDLFAAGVIALMVAISTLLNFIQEARSTKAADALKAMVSNTATVLRVINDKGENGWLEIPIDQLVPGDIIKLAAGDMIPADLRILQARDLFVAQASLTGESLPVEKAATTRQPEHSNPLECDTLCFMGTTVVSGTAQAMVIATGANTWFGQLAGRVSEQESEPNAFQQGISRVSMLLIRFMLVMAPVVLLINGYTKGDWWEAALFALSVAVGLTPEMLPMIVTSTLARGAVKLSKQKVIVKHLDAIQNFGAMDILCTDKTGTLTQDKIVLENHTDISGKTSERVLHSAWLNSHYQTGLKNLLDTAVLEGTDEESARSLASRWQKIDEIPFDFERRRMSVVVAENTEHHQLVCKGALQEILNVCSQVRHNGEIVPLDDIMLRKIKRVTDTLNRQGLRVVAVATKYLPAREGDYQRADESDLILEGYIAFLDPPKETTAPALKALKASGITVKILTGDSELVAAKVCHEVGLDAGEVVIGSDIETLSDDELANLAQRTTLFARLTPMHKERIVTLLKREGHVVGFMGDGINDAPALRAADIGISVDGAVDIAREAADIILLEKSLMVLEEGVIEGRRTFANMLKYIKMTASSNFGNVFSVLVASAFLPFLPMLPLHLLIQNLLYDVSQVAIPFDNVDDEQIQKPQRWNPADLGRFMIFFGPISSIFDILTFCLMWWVFHANTPETQTLFQSGWFVVGLLSQTLIVHMIRTRRVPFIQSCASWPLMIMTVIVMIVGIALPFSPLASYLQLQALPLSYFPWLVAILAGYMTLTQLVKGFYSRRYGW\")\n\n# Search for common motifs\nmotifs = {\n    \"Walker A (P-loop) [AG]-x(4)-GK[ST]\": \"[AG].{4}GK[ST]\",\n    \"Walker B\": \"hhhhDE\",\n    \" DEAD-box\": \"DEAD\",\n    \"Zn-finger C2H2\": \"C.{2,4}C.{3,14}H.{3,4}H\",\n    \"helix-turn-helix basic\": \"..[RK]{2,}.\",\n    \"HXXH motif\": \"H.H\",\n    \"His-Lys(-trp?) HxxH\": \"H..H\",\n    \"EFL/EFLI\": \"EF.L\",\n    \"TWxxG\": \"TW..G\",\n}\nfor name,pat in motifs.items():\n    m=[(mm.start(), mm.group()) for mm in re.finditer(pat, prot)]\n    if m and len(m)<15:\n        print(name, \"->\", m)\n\n# check for the HExxH metalloprotease motif and other signature patterns\nprint(\"HxxH:\", [m.start() for m in re.finditer(r'H..H', prot)])\nprint(\"HHxxH:\", [m.start() for m in re.finditer(r'HH..H', prot)])\n\n# Look for nucleotide-binding walker-like motifs near N-terminus\nprint(prot[:80])\nprint(prot[20:60])\n"
+      },
+      "is_error": false,
+      "output_chars": 265,
+      "nt_run": 0
+    },
+    {
+      "turn": 10,
+      "name": "run_python",
+      "input": {
+        "code": "import re\n\nseq = open('region.fasta').read().split('\\n',1)[1].replace('\\n','')\nseq_rc = seq.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\n\n#\u5df2\u7ecf\u5f88\u660e\u663e\u7684\u957f ORF \u662f\u6b63\u94fe 158..2851 (1-based inclusive)\n# \u68c0\u67e5\u4e0a\u6e3830bp\u3001\u4e0b\u6e3830bp\u7684\u5e8f\u5217\nprint(\"upstream (nt 1-157):\")\nprint(seq[:157])\nprint(\"\\ndownstream after ORF stop (nt 2852-3000):\")\nprint(seq[2851:])\n\n# check ribosome binding site (Shine-Dalgarno) upstream of ATG at 158\nup = seq[158-30-1:158-1]\nprint(\"\\n30 nt upstream of ATG(158):\", up)\n# Search AGGAGG/AGGAG/AGGA\nfor i in range(len(up)-5+1):\n    if up[i:i+4] in (\"AGGA\",\"GGAG\",\"GGGA\"):\n        print(\"candidate RBS-like:\", up[i:i+4], \"at dist\", 157-i+1, \"nt upstream of ATG\")\n"
+      },
+      "is_error": false,
+      "output_chars": 544,
+      "nt_run": 157
+    },
+    {
+      "turn": 11,
+      "name": "run_python",
+      "input": {
+        "code": "# Search for a closer RBS, e.g. a typical AGGAG 5-9 nt upstream of ATG\nseq = open('region.fasta').read().split('\\n',1)[1].replace('\\n','')\n# positions 1-based: ATG at 158\n# check nt 143..157\nprint(seq[142:157])\n"
+      },
+      "is_error": false,
+      "output_chars": 16,
+      "nt_run": 0
+    },
+    {
+      "turn": 12,
+      "name": "run_python",
+      "input": {
+        "code": "# Look for transmembrane helices / signal peptides in predicted ORF product.\nprot = (\"MFKEIFTRLIRHLPSRLVHRDPLPGAQQTVNTVVPPSLSAHCLKMAVMPEEELWKTFDTHPEGLNQAEVESAREQHGENKLPAQQPSPWWVHLWVCYRNPFNILLTILGAISYATEDLFAAGVIALMVAISTLLNFIQEARSTKAADALKAMVSNTATVLRVINDKGENGWLEIPIDQLVPGDIIKLAAGDMIPADLRILQARDLFVAQASLTGESLPVEKAATTRQPEHSNPLECDTLCFMGTTVVSGTAQAMVIATGANTWFGQLAGRVSEQESEPNAFQQGISRVSMLLIRFMLVMAPVVLLINGYTKG\"\n\"DWW\"\n\"EAALFALSVAVGLTPEMLPMIVTSTLARGAVKLSKQKVIVKHLDAIQNFGAMDILCTDKTGTLTQDKIVLENHTDISGKTSERVLHSAWLNSHYQTGLKNLLDTAVLEGTDEESARSLASRWQKIDEIPFDFERRRMSVVVAENTEHHQLVCKGALQEILNVCSQVRHNGEIVPLDDIMLRKIKRVTDTLNRQGLRVVAVATKYLPAREGDYQRADESDLILEGYIAFLDPPKETTAPALKALKASGITVKILTGDSELVAAKVCHEVGLDAGEVVIGSDIETLSDDELANLAQRTTLFARLTPMHKERIVTLLKREGHVVGFMGDGINDAPALRAADIGISVDGAVDIAREAADIILLEKSLMVLEEGVIEGRRTFANMLKYIKMTASSNFGNVFSVLVASAFLPFLPMLPLHLLIQNLLYDVSQVAIPFDNVDDEQIQKPQRWNPADLGRFMIFFGPISSIFDILTFCLMWWVFHANTPETQTLFQSGWFVVGLLSQTLIVHMIRTRRVPFIQSCASWPLMIMTVIVMIVGIALPFSPLASYLQLQALPLSYFPWLVAILAGYMTLTQLVKGFYSRRYGW\")\n\nhyd = { 'A':1.8,'R':-4.5,'N':-3.5,'D':-3.5,'C':2.5,'Q':-3.5,'E':-3.5,'G':-0.4,\n        'H':-3.2,'I':4.5,'L':3.8,'K':-3.9,'M':1.9,'F':2.8,'P':-1.6,'S':-0.8,\n        'T':-0.7,'W':-0.9,'Y':-1.3,'V':4.2}\n\n# Simple hydropathy sliding window (21 aa) to find hydrophobic regions\nimport re\nL=len(prot)\nruns=[]\nwin=21\nvals=[]\nfor i in range(L-win+1):\n    s=sum(hyd[a] for a in prot[i:i+win])/win\n    vals.append(s)\n\n# Print windows with mean hydropathy > 1.5 (likely TM-like)\nhot = [(i+1, i+win, round(v,2)) for i,v in enumerate(vals) if v>1.5]\nprint(\"21-aa windows with mean hydropathy > 1.5:\")\nfor h in hot:\n    print(h)\n\n# Also check for long stretches with no charged residues\ndef charge_string(p):\n    out=''\n    for a in p:\n        if a in 'KRH': out+='+'\n        elif a in 'DE': out+='-'\n        elif a in 'NQST': out+='n'\n        else: out+='.'\n    return out\ncs = charge_string(prot)\n# find stretches of 19 aa without + or -\nruns=[]\ni=0\nwhile i < len(cs):\n    while i < len(cs) and cs[i] in '+-':\n        i+=1\n    j=i\n    while j < len(cs) and cs[j] not in '+-':\n        j+=1\n    if j-i >= 19:\n        runs.append((i+1,j,cs[i:j]))\n    i=j\nprint(\"\\nStretches >=19 aa with no K/R/H/D/E (TM candidates):\")\nfor r in runs:\n    print(r[0], r[1], r[2])\n"
+      },
+      "is_error": false,
+      "output_chars": 1258,
+      "nt_run": 0
+    },
+    {
+      "turn": 13,
+      "name": "run_python",
+      "input": {
+        "code": "import re, math\nseq = open('region.fasta').read().split('\\n',1)[1].replace('\\n','')\nseq_rc = seq.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\nS = {'+':seq, '-':seq_rc}\n\ncodon_table = {\n 'TTT':'F','TTC':'F','TTA':'L','TTG':'L','TCT':'S','TCC':'S','TCA':'S','TCG':'S',\n 'TAT':'Y','TAC':'Y','TAA':'*','TAG':'*','TGT':'C','TGC':'C','TGA':'*','TGG':'W',\n 'CTT':'L','CTC':'L','CTA':'L','CTG':'L','CCT':'P','CCC':'P','CCA':'P','CCG':'P',\n 'CAT':'H','CAC':'H','CAA':'Q','CAG':'Q','CGT':'R','CGC':'R','CGA':'R','CGG':'R',\n 'ATT':'I','ATC':'I','ATA':'I','ATG':'M','ACT':'T','ACC':'T','ACA':'T','ACG':'T',\n 'AAT':'N','AAC':'N','AAA':'K','AAG':'K','AGT':'S','AGC':'S','AGA':'R','AGG':'R',\n 'GTT':'V','GTC':'V','GTA':'V','GTG':'V','GCT':'A','GCC':'A','GCA':'A','GCG':'A',\n 'GAT':'D','GAC':'D','GAA':'E','GAG':'E','GGT':'G','GGC':'G','GGA':'G','GGG':'G'}\n\ndef translate(s, t=codon_table):\n    bad=0; aa=[]\n    for i in range(0,len(s)-len(s)%3,3):\n        c=t.get(s[i:i+3],'X')\n        if c=='X': bad+=1\n        aa.append(c)\n    return ''.join(aa), bad\n\ndef orfs(s, strand_label, minlen=80):\n    stops = {'TAA','TAG','TGA'}\n    L=len(s); res=[]\n    for frame in range(3):\n        i=frame\n        while i+3<=L:\n            if s[i:i+3]=='ATG':\n                j=i; aa=[]\n                while j+3<=L:\n                    c=s[j:j+3]\n                    if c in stops: break\n                    aa.append(codon_table[c]); j+=3\n                if j+3<=L:\n                    p=''.join(aa)\n                    if len(p)>=minlen:\n                        res.append({'strand':strand_label,'frame':frame+1,\n                                    'nt_start':i+1,'nt_end':j+3-1-2,'prot':p,'stop':c})\n                i=j+3\n            else: i+=3\n    return res\n\nall_orfs=[]\nall_orfs += orfs(seq,'+')\nall_orfs += orfs(seq_rc,'-')\n\n# Compute codon adaptation proxy: use synonymous codon bias relative to average GC-fraction of each AA\n# Simpler: compute per-ORF counts of \"AT-rich\" vs \"GC-rich\" codons and compare to frame-matched random-like stats.\n# Better: compute GC3 skew and per-frame amino acid composition vs whole-sequence average frames.\n# Metric: fraction of codons that are AT vs GC by third positions\nfrom collections import Counter\noverall_gc3 = 0; overall_n=0\nfor i in range(2,len(seq)-2,3):\n    if seq[i] in 'GC': overall_gc3+=1\n    overall_n+=1\nprint(\"Overall GC3 (windowed-by-frame0):\", round(overall_gc3/overall_n,3))\n\nfor o in all_orfs:\n    s = S[o['strand']]\n    sub=s[o['nt_start']-1:o['nt_end']]\n    gc3=sum(1 for i in range(2,len(sub),3) if sub[i] in 'GC')\n    tot=len(sub)//3\n    print(f\"ORF strand {o['strand']} frame {o['frame']} nt {o['nt_start']}..{o['nt_end']} len {len(o['prot'])}aa, GC3={gc3/max(tot,1):.3f}, stop={o['stop']}\")\n"
+      },
+      "is_error": false,
+      "output_chars": 300,
+      "nt_run": 0
+    },
+    {
+      "turn": 14,
+      "name": "run_python",
+      "input": {
+        "code": "import re\nseq = open('region.fasta').read().split('\\n',1)[1].replace('\\n','')\n\n# restriction sites / palindromic 4-cuts and 6-cuts (typical type-II sites)\nsites4 = {\n    'AluI':'AGCT','HaeIII':'GGCC','RsaI':'GTAC','TaqI':'TCGA','MseI':'TTAA',\n    'Sau3A':'GATC','HhaI':'GCGC','MspI':'CCGG','BfaI':'CTAG','CviQI':'GTAC',\n}\nfound4 = {k:[m.start()+1 for m in re.finditer(v, seq)] for k,v in sites4.items() if len(re.findall(v,seq))>0}\nprint(\"4-cutter hits (1-based):\")\nfor k,v in found4.items():\n    print(f\"  {k} ({list(sites4.values())[list(sites4.values()).index(next(x for x in sites4.values() if x==v))]}):\", len(v), \"sites; first at\", v[:5])\n\nsites6 = {\n    'EcoRI':'GAATTC','BamHI':'GGATCC','HindIII':'AAGCTT','SalI':'GTCGAC',\n    'PstI':'CTGCAG','SmaI':'CCCGGG','XbaI':'TCTAGA','KpnI':'GGTACC',\n    'ApaI':'GGGCCC','SpeI':'ACTAGT','XhoI':'CTCGAG','NcoI':'CCATGG',\n    'EcoRV':'GATATC','BglI':'TGATCA','NsiI':'ATGCAT','SacI':'GAGCTC',\n    'PvuII':'CAGCTG','BstYI':'RGATCY','EaeI':'YGGCCR','BseRI':'GAGGAG',\n    'NaeI':'GCCGGC','PvuI':'CGATCG','NruI':'TCGCGA'\n}\nfor k,v in sites6.items():\n    m=[mm.start()+1 for mm in re.finditer(v, seq)]\n    if m:\n        print(f\"  {k} ({v}): {len(m)} sites, first at {m[:6]}\")\n        if k=='BseRI': print(\"   BseRI sites:\", m)\n"
+      },
+      "is_error": false,
+      "output_chars": 124,
+      "nt_run": 0
+    },
+    {
+      "turn": 15,
+      "name": "run_python",
+      "input": {
+        "code": "import re\nseq = open('region.fasta').read().split('\\n',1)[1].replace('\\n','')\n\nsites4 = {\n    'AluI':'AGCT','HaeIII':'GGCC','RsaI':'GTAC','TaqI':'TCGA','MseI':'TTAA',\n    'Sau3A':'GATC','HhaI':'GCGC','MspI':'CCGG','BfaI':'CTAG','CviQI':'GTAC'\n}\nfor k,v in sites4.items():\n    m=[mm.start()+1 for mm in re.finditer(v, seq)]\n    if m:\n        print(f\"  {k} ({v}): {len(m)} sites, first at {m[:5]}\")\n\nprint()\nsites6 = {\n    'EcoRI':'GAATTC','BamHI':'GGATCC','HindIII':'AAGCTT','SalI':'GTCGAC',\n    'PstI':'CTGCAG','SmaI':'CCCGGG','XbaI':'TCTAGA','KpnI':'GGTACC',\n    'ApaI':'GGGCCC','SpeI':'ACTAGT','XhoI':'CTCGAG','NcoI':'CCATGG',\n    'EcoRV':'GATATC','NsiI':'ATGCAT','SacI':'GAGCTC',\n    'PvuII':'CAGCTG','NaeI':'GCCGGC','PvuI':'CGATCG','NruI':'TCGCGA'\n}\nfor k,v in sites6.items():\n    m=[mm.start()+1 for mm in re.finditer(v, seq)]\n    if m:\n        print(f\"  {k} ({v}): {len(m)} sites, first at {m[:6]}\")\n\n# Interesting: EcoRV GATATC is overlapping the \"ATATTC\" like sequence? Check around the observed GGAGG/GAGGAG motif\nm=[mm.start()+1 for mm in re.finditer('GATATC', seq)]\nprint(\"EcoRV GATATC positions:\", m)\n\n# BseRI GAGGAG type-II-like or other sites containing GGAGG/CCCTC (e.g., BspMI: ACCTGC? no)\n# Look for CRISPR/repeat-like repeats: exact repeats >=20nt\nfrom collections import defaultdict\nk=20\nd=defaultdict(list)\nfor i in range(len(seq)-k+1):\n    d[seq[i:i+k]].append(i+1)\nrep=[(v[0],v) for v in d.values() if len(v)>1]\nprint(\"\\nExact 20-mers appearing more than once:\", len(rep))\nfor r,v in rep[:20]:\n    print(v)\n"
+      },
+      "is_error": false,
+      "output_chars": 908,
+      "nt_run": 0
+    },
+    {
+      "turn": 16,
+      "name": "run_python",
+      "input": {
+        "code": "seq = open('region.fasta').read().split('\\n',1)[1].replace('\\n','')\n\n# GC skew: (G-C)/(G+C) over 100bp windows\ndef gskew(s):\n    return (s.count('G')-s.count('C'))/(s.count('G')+s.count('C')+1e-9)\nskew=[]\nfor i in range(0,3000,100):\n    skew.append((i+1, round(gskew(seq[i:i+100]),3)))\nprint(\"GC skew per 100bp window:\")\nprint(skew)\n\n# check third-position nucleotide distribution in the frame-2 ORF\n# frame 2 of plus strand corresponds to a different registers. Just check GC at third positions across the whole sequence and the ORF.\norf=seq[157:2851]\ng=orf[2::3]; c=orf[1::3]; a=orf[0::3]\ndef gc(s): return sum(1 for x in s if x in 'GC')/len(s)\nprint(\"\\nnt register GC content in ORF:\")\nprint(\" pos1 register GC:\", round(gc(a),3))\nprint(\" pos2 register GC:\", round(gc(c),3))\nprint(\" pos3 register GC:\", round(gc(g),3))\n\n# codon counts\nfrom collections import Counter\ncodons=[orf[i:i+3] for i in range(0,len(orf),3)]\nprint(\"\\nMost common codons in big ORF:\", Counter(codons).most_common(10))\nprint(\"Codon count total:\", len(codons), \" stops:\", Counter(codons).get('TAA',0)+Counter(codons).get('TAG',0)+Counter(codons).get('TGA',0))\n# rare codon enrichment: AGG, AGA(arg), ATA (ile), etc. in this AT-rich context\nfor c in ['ATC','ATA','ATT','AGG','AGA','GGA','TTA','CCC','TCG','ACA']:\n    print(c, Counter(codons).get(c,0), f\"({Counter(codons).get(c,0)*100/len(codons):.1f}%)\")\n"
+      },
+      "is_error": false,
+      "output_chars": 899,
+      "nt_run": 0
+    },
+    {
+      "turn": 17,
+      "name": "run_python",
+      "input": {
+        "code": "seq = open('region.fasta').read().split('\\n',1)[1].replace('\\n','')\n\n# Look at the region around nt 158 start; check attenuation/promoter-like features upstream.\nup = seq[:157]\n# -10 motif TATAAT / -35 TTGACA like variants\nimport re\n# search -10 consensus TATAAT within nt 100-157 (should be ~18-24 nt up of -35 or ~12 nt up of start)\nfor i in range(60,140):\n    k=up[i:i+6]\n    matches = sum(1 for a,b in zip(k, \"TATAAT\") if a==b)\n    if matches>=5:\n        print(\"candidate -10-like motif:\", k, \"at position\", i+1, \"mismatches\", 6-matches)\n# print positions 120-157\nprint(\"\\nupstream last 40 nt:\", up[-40:])\nprint(\"upstream last 60 nt:\", up[-60:])\n"
+      },
+      "is_error": false,
+      "output_chars": 145,
+      "nt_run": 60
+    },
+    {
+      "turn": 18,
+      "name": "run_python",
+      "input": {
+        "code": "seq = open('region.fasta').read().split('\\n',1)[1].replace('\\n','')\n\n# check homopolymer runs >5 and simple repeats\nimport re\nfor m in re.finditer(r'(.)\\1{5,}', seq):\n    print(\"homopolymer\", m.group(), \"at\", m.start()+1, \"len\", len(m.group()))\nprint()\n\n# look for possible rho-independent terminator after ORF (nt 2852..2950) - inverted repeat stem-loop\nsub = seq[2851:2950]\nprint(\"post-ORF 100 nt:\", sub)\nprint()\n\n# search for any inverted repeats >=10nt with <=2 mismatches within the whole sequence\nimport itertools\ndef rc(s): return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\nfinds=[]\nfor i in range(len(seq)-10):\n    for j in range(i+20, len(seq)-10):\n        a=seq[i:i+10]; b=seq[j:j+10]\n        if not set(a+b)<=set('ACTG'): continue\n        if a==rc(b):\n            mm=sum(1 for x,y in zip(a,rc(b)) if x!=y)\n            if mm<=2:\n                finds.append((i+1, j+1, j-i+10, a, bb:=seq[j:j+10]))\n                break\nprint(\"inverted repeat pairs with <=2 mismatches (10nt arms, >=20nt spacer):\", len(finds))\nfor f in finds[:10]:\n    print(f)\n"
+      },
+      "is_error": false,
+      "output_chars": 395,
+      "nt_run": 99
+    }
+  ],
+  "turns": [
+    {
+      "input_tokens": 428,
+      "output_tokens": 31,
+      "cached_tokens": 0,
+      "tool_calls": 2,
+      "seconds": 0.9
+    },
+    {
+      "input_tokens": 1534,
+      "output_tokens": 131,
+      "cached_tokens": 0,
+      "tool_calls": 1,
+      "seconds": 1.6
+    },
+    {
+      "input_tokens": 2143,
+      "output_tokens": 13,
+      "cached_tokens": 384,
+      "tool_calls": 1,
+      "seconds": 1.2
+    },
+    {
+      "input_tokens": 3224,
+      "output_tokens": 27,
+      "cached_tokens": 1408,
+      "tool_calls": 1,
+      "seconds": 1.5
+    },
+    {
+      "input_tokens": 4068,
+      "output_tokens": 26,
+      "cached_tokens": 2048,
+      "tool_calls": 1,
+      "seconds": 0.9
+    },
+    {
+      "input_tokens": 4460,
+      "output_tokens": 121,
+      "cached_tokens": 3200,
+      "tool_calls": 1,
+      "seconds": 2.2
+    },
+    {
+      "input_tokens": 6161,
+      "output_tokens": 193,
+      "cached_tokens": 4352,
+      "tool_calls": 1,
+      "seconds": 3.9
+    },
+    {
+      "input_tokens": 6622,
+      "output_tokens": 741,
+      "cached_tokens": 4480,
+      "tool_calls": 1,
+      "seconds": 7.1
+    },
+    {
+      "input_tokens": 7439,
+      "output_tokens": 513,
+      "cached_tokens": 6144,
+      "tool_calls": 1,
+      "seconds": 3.4
+    },
+    {
+      "input_tokens": 8541,
+      "output_tokens": 854,
+      "cached_tokens": 6528,
+      "tool_calls": 1,
+      "seconds": 5.9
+    },
+    {
+      "input_tokens": 9535,
+      "output_tokens": 262,
+      "cached_tokens": 8448,
+      "tool_calls": 1,
+      "seconds": 4.0
+    },
+    {
+      "input_tokens": 10044,
+      "output_tokens": 86,
+      "cached_tokens": 8960,
+      "tool_calls": 1,
+      "seconds": 1.5
+    },
+    {
+      "input_tokens": 10144,
+      "output_tokens": 1009,
+      "cached_tokens": 9472,
+      "tool_calls": 1,
+      "seconds": 6.3
+    },
+    {
+      "input_tokens": 12115,
+      "output_tokens": 962,
+      "cached_tokens": 0,
+      "tool_calls": 1,
+      "seconds": 18.0
+    },
+    {
+      "input_tokens": 13223,
+      "output_tokens": 530,
+      "cached_tokens": 0,
+      "tool_calls": 1,
+      "seconds": 14.8
+    },
+    {
+      "input_tokens": 13792,
+      "output_tokens": 604,
+      "cached_tokens": 7296,
+      "tool_calls": 1,
+      "seconds": 10.5
+    },
+    {
+      "input_tokens": 14866,
+      "output_tokens": 482,
+      "cached_tokens": 9728,
+      "tool_calls": 1,
+      "seconds": 9.6
+    },
+    {
+      "input_tokens": 15867,
+      "output_tokens": 222,
+      "cached_tokens": 9728,
+      "tool_calls": 1,
+      "seconds": 5.8
+    },
+    {
+      "input_tokens": 16162,
+      "output_tokens": 346,
+      "cached_tokens": 12160,
+      "tool_calls": 1,
+      "seconds": 7.9
+    },
+    {
+      "input_tokens": 16368,
+      "output_tokens": 1234,
+      "cached_tokens": 0,
+      "tool_calls": 0,
+      "seconds": 40.3
+    }
+  ],
+  "request_ids": [
+    "chatcmpl-IjHBjImFsL6QA1AJNLDX1XCJv9Ksi",
+    "chatcmpl-blLfws6HAJSwAGW1C71xEET6LsrXf",
+    "chatcmpl-BF0LooJf6YpNwpGTwljQp3NW0H8HK",
+    "chatcmpl-Jfp9AmM3MhDsFCqkZXZQvl9DmmIHI",
+    "chatcmpl-XRb1JNBFkqxd6iYpO6wHgti5j3oSg",
+    "chatcmpl-HsmxGY9X7hBUMY163o1zijbdQ9b1E",
+    "chatcmpl-B6vMH9uKBgu1YAI9ugamiMtau4ei7",
+    "chatcmpl-IhuRWuWAVkdrxcD1fTYnmFZs845c6",
+    "chatcmpl-vxbJKgkHKq23X6HEgII1lJ7BwhGwM",
+    "chatcmpl-VArHLCP1EOXyWsvgZoVgILETbBwtG",
+    "chatcmpl-XIqHZo3TeBBGagA3wFrxOqBivtTDM",
+    "chatcmpl-PZbIMuT5bAGGqHSG5DnggD5kuN3dC",
+    "chatcmpl-nKS63wsdjdMGie3dMWiaIDGrRAGfy",
+    "chatcmpl-RwvXjklZMqgWllgcxPEqQh6M",
+    "chatcmpl-RD2sPov92g9HFoBswm9Xs5qQ",
+    "chatcmpl-RP4AgBGPTrDvuwKmySGfffyB",
+    "chatcmpl-R0TuCfhzYDomE9BpmXJFaWfr",
+    "chatcmpl-RODBt0eAUK0hir2Rhf4CVTys",
+    "chatcmpl-RQ3qXYMoYpvjIbsyeYHrATD8",
+    "chatcmpl-R2uXgC53vlpQgycNvSyOowqZ"
+  ],
+  "served_models": [
+    "glm-5.3-flash"
+  ],
+  "input_tokens": 176736,
+  "output_tokens": 8387,
+  "cached_tokens": 94336,
+  "status": "end_turn",
+  "forced_report": true,
+  "refusal_category": null,
+  "report": "# Report: region.fasta (`region_004`, 3000 bp)\n\n**Overall composition:** 1442 A/T vs 1562 G/C \u2014 52.1% GC overall, no obvious GC-skew switchpoint, no long repeats, no unusual small-sequence motifs (no CRISPR-like arrays, no >6 nt homopolymers except two isolated AAAAAA runs at nt 1470 and 2181, no palindromic repeat clusters). Nothing striking among common restriction sites (e.g., 18 Sau3A/GATC, 22 HhaI/GCGC, only single-cut EcoRV GATATC at nt 1325, 2114, 2165; single NsiI at nt 2015; single SalI at nt 2402).\n\n## The notable feature \u2014 one long, tight ORF\n\nThe region essentially contains one dominant coding sequence:\n\n- **Coordinates: nt 158\u20132851 on the plus strand, frame 2.**\n- Length: 2694 nt, coding 897 aa plus a **TAA stop at nt 2849\u20132851**.\n- An in-frame **ATG start at nt 158\u2013160**; the 157 nt 5\u2032 leader contains no upstream stop/ATG conflict, though no strong Shine-Dalgarno (GGAGG) matching canonical spacing was found \u2014 the closest GGAGG box is ~140 nt upstream, so this may be a leadered/bacterium-thyle-specific RBS or the annotation start could be nearby.\n- **Codon usage is strongly biased and consistent with real coding sequence:** no internal TAA/TAG/TGA stops across 898 sense codons; GC3 = 59.5% inside the ORF vs 40.5% for the whole record; AGG and AGA are **completely absent** (0 occurrences of either Arg codon); common codons are CTG (6.5%), GTG (4.6%), GCG (4.3%), ATT, GAA, GAT, CCG. ATA (Ile) occurs only once \u2014 a pattern typical of a real, GC-biased bacterial gene.\n- By contrast, other frames/background GC3 sits near 40\u201352% for non-coding-like windows (e.g., frame-2 GC3 extractions read 39.6% for position-2 register (highest Expect for random) versus 59.5% for the reading frame \u2014 a 20-point swing that firmly marks the ORF).\n\nNo secondary ORF of comparable size exists; the largest alternative is a modest 172-aa ORF on the minus strand (nt 748\u20131263) plus several 80\u201386-aa ones (frame 1 +, nt 2572\u20132829, 86 aa; frame 3 \u2212, nt 1620\u20131859, 80 aa) that read more like background noise given GC3 near random-level values.\n\n## Protein-level characteristics of the 897-aa product\n\n- Amino-acid composition is bacterial-gene-like: high L (108), A (83), V (73), I (61), T (57), G (52), D (45), R (43), P (43); low H (20), C (10), Y (14).\n- Contains **5\u20136 clear hydrophobic stretches** that look like membrane-spanning helices rather than a signal peptide:\n  - aa ~118\u2013138,\n  - **aa ~284\u2013310** (strongest, mean 21-aa hydropathy up to 2.11),\n  - ~317\u2013339,\n  - ~701\u2013728,\n  - ~767\u2013788,\n  - **aa ~826\u2013887** (longest, ~60 aa largely free of charged residues, hydropathy peak 2.33).\n- Mixed in with this is a Lys/Glu-rich, moderately basic overall character hinted by the distribution of R/K/E clusters around aa 446, 493, 627, 686 and 821 \u2014 classic for helical membrane or DNA-binding proteins. No Walker A/P-loop, no HExxH, no obvious C2H2 Zn-finger; no DEAD-box. In short, the sequence is not readily assigned to a familiar enzyme family by motif alone, but its **multi-helix architecture**, size, and codon bias all strongly support that it is a genuine, expressed, likely integral membrane protein occupying nearly the whole of the fragment.\n\n## Restricted up/downstream context\n\n- 5\u2032 flank (nt 1\u2013157) is a short, A/T-normal leader (~45% GC) \u2014 consistent with a promoter/RBS being cut off immediately upstream.\n- 3\u2032 flank (nt 2852\u20133000) is 149 nt of non-coding sequence ending abruptly at the fragment boundary; it contains no strong rho-independent stem-loop beyond weak, long-distance inverted repeats that likely reflect a shared repetitive element rather than a terminator.\n\n## Bottom line\n\n**This fragment is not anonymous flanking DNA \u2014 it is one gene.** The dominant feature is a single, well-behaved protein-coding ORF at **nt 158\u20132851 (+ strand)** encoding an ~897-aa **multi-pass membrane protein**, with strong codon-bias hallmark (GC3 \u2248 60%, complete absence of AGG/AGA, high usage of CTG/GTG/GCG/ATT). Other candidate ORFs and downstream/downstream elements show no convincing coding signature. Function cannot be pinned by motif alone, but the multi-TM architecture makes it most consistent with a transporter, channel, or receptor-like protein; nothing else in the 3000 bp stands out.",
+  "nt_run_from_tools": 3000,
+  "seen_intervals": [
+    [
+      1,
+      3000
+    ]
+  ],
+  "tool_errors": 0,
+  "seconds": 152.8,
+  "provider": "opencode-go",
+  "rep": 2,
+  "claims": {
+    "features": [
+      {
+        "type": "gene",
+        "start": 158,
+        "end": 2851,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "long ORF encoding ~897-aa multi-pass membrane protein"
+      }
+    ],
+    "named_identity": []
+  },
+  "judge_model": "kimi-k2.7-code"
+}

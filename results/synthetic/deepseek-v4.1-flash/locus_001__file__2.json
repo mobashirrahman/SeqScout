@@ -1,0 +1,212 @@
+{
+  "locus": "locus_001",
+  "condition": "file",
+  "model": "deepseek-v4.1-flash",
+  "effort": null,
+  "read_default": 2000,
+  "tool_calls": [
+    {
+      "name": "list_files",
+      "input": {},
+      "is_error": false,
+      "output_chars": 17,
+      "nt_run": 0
+    },
+    {
+      "name": "read_file",
+      "input": {
+        "path": "region.fasta"
+      },
+      "is_error": false,
+      "output_chars": 2028,
+      "nt_run": 1961
+    },
+    {
+      "name": "read_file",
+      "input": {
+        "path": "region.fasta",
+        "offset": 2000,
+        "length": 1200
+      },
+      "is_error": false,
+      "output_chars": 1085,
+      "nt_run": 1039
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\"\nfor line in open('region.fasta'):\n    if line.startswith('>'): continue\n    seq += line.strip()\nprint(\"length:\", len(seq))\nfrom collections import Counter\nc = Counter(seq)\nprint(c)\ngc = (c['G']+c['C'])/len(seq)\nprint(\"GC:\", round(gc,4))\n# windows\nfor i in range(0,len(seq),500):\n    w=seq[i:i+500]\n    cc=Counter(w)\n    print(i+1, i+len(w), round((cc['G']+cc['C'])/len(w),3))\n"
+      },
+      "is_error": false,
+      "output_chars": 163,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\ncomp = str.maketrans(\"ACGT\",\"TGCA\")\nrc = seq.translate(comp)[::-1]\nstops = {\"TAA\",\"TAG\",\"TGA\"}\n\ndef orfs(s, name):\n    res=[]\n    for f in range(3):\n        i=f\n        start=None\n        while i+3<=len(s):\n            cod=s[i:i+3]\n            if start is None:\n                if cod==\"ATG\":\n                    start=i\n            else:\n                if cod in stops:\n                    res.append((name, f, start, i+3, i+3-start))\n                    start=None\n            i+=3\n    return res\n\nallorfs = orfs(seq,\"+\")+orfs(rc,\"-\")\nallorfs.sort(key=lambda x:-x[4])\nfor o in allorfs[:15]:\n    print(o)\n"
+      },
+      "is_error": false,
+      "output_chars": 375,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nn=len(seq)\n# longest exact repeated substring\nbest=(0,None,None,None)\nseen={}\nL=15\nfor i in range(n-L+1):\n    k=seq[i:i+L]\n    if k in seen:\n        # extend\n        j=seen[k]\n        e=L\n        while i+e<n and j+e<n and seq[i+e]==seq[j+e]:\n            e+=1\n        if e>best[0]:\n            best=(e,i,j,k)\n    else:\n        seen[k]=i\nprint(\"longest exact repeat length:\", best[0], \"positions\", best[1]+1, best[2]+1)\nprint(\"seq:\", seq[best[1]:best[1]+best[0]])\n"
+      },
+      "is_error": false,
+      "output_chars": 152,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nn=len(seq)\nfor L in [12,10,8]:\n    seen={}\n    hits=[]\n    for i in range(n-L+1):\n        k=seq[i:i+L]\n        if k in seen:\n            hits.append((seen[k],i,k))\n        else:\n            seen[k]=i\n    print(\"L=\",L,\"num repeat hits:\",len(hits))\n    for h in hits[:20]:\n        print(\"   \",h[0]+1,h[1]+1,h[2])\n"
+      },
+      "is_error": false,
+      "output_chars": 598,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nn=len(seq)\nimport re\n# homopolymer runs\nfor m in re.finditer(r'(A{5,}|T{5,}|G{5,}|C{5,})', seq):\n    print(\"run\", m.group(), m.start()+1, m.end())\nprint(\"---\")\n# inverted repeats / palindromes length>=10\ndef revcomp(s):\n    return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\nfound=[]\nfor L in range(14,9,-1):\n    for i in range(n-L+1):\n        k=seq[i:i+L]\n        r=revcomp(k)\n        j=seq.find(r, i+L)\n        if j!=-1:\n            found.append((L,i+1,j+1,k))\n    if found: break\nprint(\"palindromes:\",found[:10])\n"
+      },
+      "is_error": false,
+      "output_chars": 271,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nn=len(seq)\n# GC windows of 100\nimport statistics\nwins=[]\nfor i in range(0,n-99,50):\n    w=seq[i:i+100]\n    wins.append(((sum(c in 'GC' for c in w))/100.0, i+1))\nvals=[x[0] for x in wins]\nprint(\"window GC min\", round(min(vals),3), \"max\", round(max(vals),3), \"mean\", round(statistics.mean(vals),3), \"sd\", round(statistics.pstdev(vals),3))\nlo=min(wins); hi=max(wins)\nprint(\"lowest GC window:\", lo)\nprint(\"highest GC window:\", hi)\n\n# GC skew (G-C)/(G+C) in 500 windows\nfor i in range(0,n,250):\n    w=seq[i:i+250]\n    g=w.count('G'); c=w.count('C')\n    print(i+1, round((g-c)/(g+c),3), \"GCskew\", \"ATskew\", round((w.count('A')-w.count('T'))/(w.count('A')+w.count('T')),3))\n"
+      },
+      "is_error": false,
+      "output_chars": 487,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nn=len(seq)\ndef find(s, pat, both=True, label=\"\"):\n    r=str.maketrans(\"ACGT\",\"TGCA\")\n    rc=pat.translate(r)[::-1]\n    hits=[m.start()+1 for m in __import__('re').finditer(\"(?=\"+pat+\")\", s)]\n    hits2=[m.start()+1 for m in __import__('re').finditer(\"(?=\"+rc+\")\", s)] if both else []\n    print(label or pat, \"fwd\", hits, \"rev\", hits2)\n\nfor pat,lab in [(\"GAATTC\",\"EcoRI\"),(\"GGATCC\",\"BamHI\"),(\"AAGCTT\",\"HindIII\"),(\"GGTCTC\",\"BsaI\"),\n                (\"TATAAA\",\"TATA-like\"),(\"GGGCGG\",\"GCbox\"),(\"AATAAA\",\"polyA signal\"),\n                (\"GCTGGTGG\",\"Chi\"),(\"GTTGAC...CAAT\",\"-10/-35?\"),(\"GTTTGC..\",\"\"),\n                (\"GGCGGG\",\"\"),(\"CGCG\",\"CpG dense\")]:\n    try: find(seq,pat,True,lab)\n    except Exception as e: print(e)\n"
+      },
+      "is_error": false,
+      "output_chars": 451,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nimport random\nseq = \"\".join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nn=len(seq)\ncomp = str.maketrans(\"ACGT\",\"TGCA\")\nrc = seq.translate(comp)[::-1]\nstops={\"TAA\",\"TAG\",\"TGA\"}\ndef maxorf(s):\n    m=0; arg=None\n    for f in range(3):\n        i=f; start=None\n        while i+3<=len(s):\n            cod=s[i:i+3]\n            if start is None:\n                if cod==\"ATG\": start=i\n            else:\n                if cod in stops:\n                    if i+3-start>m: m=i+3-start; arg=(f,start,i+3)\n                    start=None\n            i+=3\n    return m,arg\nobs=max(maxorf(seq)[0], maxorf(rc)[0])\nprint(\"observed max ORF:\", obs)\n\nletters='ACGT'; weights=[seq.count(c) for c in letters]\nsims=[]\nfor _ in range(200):\n    s=''.join(random.choices(letters,weights=weights,k=n))\n    sims.append(max(maxorf(s)[0], maxorf(s.translate(comp)[::-1])[0]))\nsims.sort()\nimport statistics\nprint(\"simulated max ORF: mean\",round(statistics.mean(sims),1),\"median\",sims[len(sims)//2],\"95th\",sims[int(0.95*len(sims))],\"max\",max(sims))\nprint(\"pct of sims >= obs:\", round(100*sum(x>=obs for x in sims)/len(sims),1))\n"
+      },
+      "is_error": false,
+      "output_chars": 105,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nn=len(seq)\n# tandem repeats: unit length 2..25, at least 3 copies (or 2 copies if unit>=15), approximate\ndef score_tandem(seq,p,i):\n    # repeat starting at i with period p, count copies allowing 1 mismatch per unit\n    unit=seq[i:i+p]\n    j=i; reps=0\n    while j+p<=n:\n        mism=sum(1 for a,b in zip(seq[j:j+p],unit) if a!=b)\n        if mism<=max(1,p//8):\n            reps+=1; j+=p\n        else:\n            break\n    return reps, j-i\nbest=[]\nfor p in range(2,26):\n    i=0\n    while i+p<=n:\n        reps,length=score_tandem(seq,p,i)\n        maxreps=n//p\n        if (reps>=3 and length>=18) or (p>=15 and reps>=2 and length>=30):\n            # exact-ish\n            misstot=sum(1 for k in range(length) if seq[i+k]!=seq[i+(k%p)])\n            if misstot<=length*0.12:\n                best.append((length,p,reps,i+1,seq[i:i+min(length,60)]))\n            i+=p\n        else:\n            i+=1\nbest.sort(reverse=True)\nseen=set()\nfor b in best[:15]:\n    print(b)\n"
+      },
+      "is_error": false,
+      "output_chars": 11,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nn=len(seq)\nresults=[]\nfor p in range(2,31):\n    for i in range(0, n-2*p+1):\n        unit=seq[i:i+p]\n        j=i+p; reps=1\n        while j+p<=n:\n            mism=sum(1 for a,b in zip(seq[j:j+p],unit) if a!=b)\n            if mism<=1:\n                reps+=1; j+=p\n            else:\n                break\n        span=j-i\n        results.append((span, reps, p, i+1, unit))\nresults.sort(reverse=True)\nseen=set(); out=0\nfor span,reps,p,i,unit in results:\n    if reps<2: continue\n    key=(i//20)\n    if key in seen: continue\n    seen.add(key)\n    print(f\"span={span} reps={reps} period={p} start={i} unit={unit}\")\n    out+=1\n    if out>=10: break\n"
+      },
+      "is_error": false,
+      "output_chars": 434,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nn=len(seq)\nfrom itertools import product\nmono={c:seq.count(c)/n for c in \"ACGT\"}\nprint(\"Mono:\", {k:round(v,4) for k,v in mono.items()})\nprint()\nprint(\"Dinucleotide odds ratios (obs/exp):\")\nfor a,b in product(\"ACGT\",repeat=2):\n    d=a+b\n    obs=sum(1 for i in range(n-1) if seq[i:i+2]==d)/(n-1)\n    exp=mono[a]*mono[b]\n    print(f\"{d}: {obs/exp:.2f}\", end=\"   \")\nprint()\nprint()\n# trinucleotide extremes\ntri={}\nfor i in range(n-2):\n    t=seq[i:i+3]\n    tri[t]=tri.get(t,0)+1\nexp_tri=(n-2)/64\nvals=sorted(tri.items(), key=lambda x:-x[1])\nprint(\"most common trinucleotides (obs, ratio to uniform):\")\nfor t,c in vals[:8]:\n    print(\"  \",t,c, round(c/exp_tri,2))\nprint(\"least common:\")\nfor t,c in vals[-5:]:\n    print(\"  \",t,c, round(c/exp_tri,2))\n"
+      },
+      "is_error": false,
+      "output_chars": 532,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nn=len(seq)\n# approximate repeats: 30-mer matching elsewhere with <=2 mismatches\nL=30\nimport collections\ndef mism(a,b): return sum(1 for x,y in zip(a,b) if x!=y)\nhits=[]\nfor i in range(0,n-L+1,5):\n    for j in range(i+L+1, n-L+1, 5):\n        if mism(seq[i:i+L], seq[j:j+L])<=2:\n            hits.append((i+1,j+1))\nprint(\"approx repeats (30mer, <=2mm):\", len(hits))\nfor h in hits[:20]: print(h)\n"
+      },
+      "is_error": false,
+      "output_chars": 33,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nn=len(seq)\nw=100\ncum=0; pts=[]\nfor i in range(0,n-w+1,w):\n    win=seq[i:i+w]\n    g=win.count('G'); c=win.count('C')\n    cum += (g-c)/(g+c)\n    pts.append((i+1, cum))\n# print every 3rd\nfor p in pts[::3]:\n    print(p[0], round(p[1],2))\n"
+      },
+      "is_error": false,
+      "output_chars": 97,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nimport random, re\nseq = \"\".join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nn=len(seq); letters='ACGT'; weights=[seq.count(c) for c in letters]\ncomp=str.maketrans(\"ACGT\",\"TGCA\")\ndef revcomp(s): return s.translate(comp)[::-1]\n\ndef stats(s):\n    # longest homopolymer\n    hp=max(len(m.group()) for m in re.finditer(r'(A+|T+|G+|C+)', s))\n    # longest palindrome (perfect) up to 20\n    pal=0\n    for L in range(20,7,-1):\n        found=False\n        for i in range(n-L+1):\n            if s[i:i+L]==revcomp(s[i:i+L]):\n                pal=L; found=True; break\n        if found: break\n    # GC window sd\n    gcs=[sum(c in 'GC' for c in s[i:i+100])/100 for i in range(0,n-99,100)]\n    mean=sum(gcs)/len(gcs); sd=(sum((x-mean)**2 for x in gcs)/len(gcs))**0.5\n    # cumulative skew range\n    cum=0; vals=[]\n    for i in range(0,n-99,100):\n        w=s[i:i+100]; g=w.count('G'); c=w.count('C'); cum+=(g-c)/(g+c); vals.append(cum)\n    return hp,pal,sd,max(vals)-min(vals)\n\nobs=stats(seq)\nprint(\"observed (homopolymer, palindrome, GCsd, skewrange):\", tuple(round(x,3) for x in obs))\nsims=[stats(''.join(random.choices(letters,weights=weights,k=n))) for _ in range(300)]\nfor k,name in enumerate([\"homopolymer\",\"palindrome\",\"GCsd\",\"skewrange\"]):\n    col=sorted(x[k] for x in sims)\n    o=obs[k]\n    pct=100*sum(x>=o for x in col)/len(col)\n    print(f\"{name}: obs={round(o,3)} sim mean={round(sum(col)/len(col),3)} 95th={col[int(0.95*len(col))]} max={round(max(col),3)} pctile={round(pct,1)}%\")\n"
+      },
+      "is_error": false,
+      "output_chars": 358,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nn=len(seq); comp=str.maketrans(\"ACGT\",\"TGCA\")\nrc=seq.translate(comp)[::-1]; stops={\"TAA\",\"TAG\",\"TGA\"}\n# longest stop-free stretch in each frame\ndef longest_stopfree(s,label):\n    best=(0,None)\n    for f in range(3):\n        i=f; run=0; start=i\n        while i+3<=len(s):\n            if s[i:i+3] in stops:\n                if run>best[0]: best=(run,(label,f,start+1,i))\n                run=0; start=i+3\n            else:\n                run+=3\n            i+=3\n        if run>best[0]: best=(run,(label,f,start+1,i))\n    return best\na=longest_stopfree(seq,\"+\"); b=longest_stopfree(rc,\"-\")\nprint(\"longest stop-free: plus\",a, \" minus\",b)\n\n# longest purine/pyrimidine run? and AT-rich stretches (>=30 of 40)\nfor i in range(0,n-40):\n    w=seq[i:i+40]\n    if sum(c in 'AT' for c in w)>=36:\n        print(\"AT-rich 40mer at\", i+1, w)\n"
+      },
+      "is_error": false,
+      "output_chars": 83,
+      "nt_run": 0
+    }
+  ],
+  "request_ids": [
+    "02179123874641025f2f82b7160c183ba98a715c9386d7132413f",
+    "02179123874787870c18af9f89e89788c62dbe222232361bc8d95",
+    "0217912387493714498c7002523dcce63b4e4e02dd9ae9cd765bc",
+    "021791238751635d3ceb3d471ce278cd568773b7d71d639a0f3f3",
+    "021791238754228a25d9fd8bbdfc574a90b55d3ae211a6215d7ae",
+    "0217912387577267e031431b40d2024cf18919c414bfdfafb6a0c",
+    "0217912387599139aa9d0b0344e85196ac345634277259cb2ed76",
+    "0217912387641118cdbdac5f420e20fe0e1829640806a224015b2",
+    "0217912387698122e03d1d5cb4d12864ab68947fc6ea20787e838",
+    "021791238775656c305af2c12e62e554ff5b6f08b2a8ff738aae2",
+    "021791238780473f6ba3ba09f8d739ff3017972d8947b2ed8494d",
+    "021791238785271978acb49f7cce3ba6727b8cdf360fb7e22a0fa",
+    "021791238788560b52b40748efca76dec1583940832f7e45d9e77",
+    "0217912387922287e031431b40d2024cf18919c414bfdfae9c4c8",
+    "021791238799934f0a583d75381f7c0a662383f3247915ed4e8a6",
+    "021791238803853eed3fa2be8288e45c6ad198b6ab1561ac020e6",
+    "021791238816568a139bd89baa39633285680c9471d15ef3767bc",
+    "02179123882325116e812ea4822a09eb3d0e01cc9319ecd530bdd"
+  ],
+  "input_tokens": 110588,
+  "output_tokens": 10966,
+  "status": "end_turn",
+  "forced_report": false,
+  "refusal_category": null,
+  "report": "I've gathered enough to complete a thorough characterization. Here's my report.\n\n---\n\n# Report: `region.fasta` (`locus_001`)\n\n## Basic composition\n- **Length:** 3,000 bp (coordinates 1\u20133,000), one clean FASTA record, only A/C/G/T.\n- **Base composition:** A 883 (29.4%), T 855 (28.5%), G 639 (21.3%), C 623 (20.8%) \u2192 **GC = 42.1%**, slightly AT-rich. (Expected by chance in humans/vertebrates would be \u224841% GC, so this is *not* an unusually AT-rich \"island\" region, but it is AT-leaning.)\n- Composition is homogeneous along the sequence: sliding-window GC (100 bp) ranges only 0.34\u20130.52 with SD 0.038, and the lowest/highest windows (\u2248pos 2201 / 1351) are each within ~2 SD of the mean. There is **no compositional discontinuity**, no AT-rich \"island,\" no GC-rich peak that would mark an inserted element.\n\n## Coding content \u2014 none significant\n- Longest ORF (ATG \u2026 stop) in all six frames: **252 bp** on the reverse strand (\u2248 2,102\u20132,354 on the forward strand; the longest forward-strand ORF is 147 bp at 410\u2013557).\n- Longest stop-free stretch anywhere: 267 bp (forward frame 2, \u2248 288\u2013554).\n- Simulation control: in 200 composition-matched random sequences, the longest ORF averaged 251.8 bp (median 246; 95th percentile 363). The observed 252 bp is **exactly what random sequence produces** (44th percentile). \n- **Conclusion:** this region is non-coding; it contains no plausible gene.\n\n## Repeats, structure, motifs \u2014 nothing unusual\n| Feature searched | Best hit | Coordinates (1-based) | Verdict |\n|---|---|---|---|\n| Longest exact repeat (\u226510 bp) | 10 bp `TCACAGCATA`; also `AGGAACGGTA` | 486\u2013495 vs 1261\u20131270; 177\u2013186 vs 1445\u20131454 | Chance-level (\u22484 expected pairs in 3 kb) |\n| Approximate repeats (30-mer, \u22642 mismatches) | **none** | \u2014 | No segmental duplication |\n| Tandem/simple repeats | max span 18 bp (AA\u00d79, GT\u00d78) | 1752, 2779, 900 | Trivial |\n| Perfect palindrome (hairpin) | 8 bp | \u2014 | *Below* random expectation (sim mean \u224812 bp) |\n| Inverted-repeat pair | 12 bp `CTATGATGAACC` | 1601 & 2911 | \u22480.3 expected by chance |\n| Homopolymer runs | max 6 nt (`CCCCCC`, `GGGGGG`) | 978\u2013983, 1361\u20131366, 2384\u20132389 | Within random expectation |\n| Common motifs (TATA, GC-box, polyA, restriction sites, Chi) | sporadic, count \u2248 random | \u2014 | Nothing clustered or significant |\n\n## Compositional oddities\n- Dinucleotide odds ratios (observed/expected) are all **0.89\u20131.07**, i.e. essentially uniform. In particular **CpG is not depleted** (CG = 1.03), and there is no A/T or G/C strand asymmetry.\n- This flat dinucleotide spectrum is atypical of real genomic DNA (which normally shows CpG suppression and skewed dinucleotides) and is the hallmark of a **randomly generated sequence** matched to a target composition.\n- Cumulative GC-skew fluctuates (trough near ~1,500, peak near ~2,400) but with an amplitude fully within random simulation (observed range 1.21 vs. simulated mean 1.24; 45th percentile). **No replication origin/terminus signal.**\n\n## Bottom line\n**Nothing biologically notable stands out.** `locus_001` behaves like a 3,000-bp AT-rich (42.1% GC) *random/non-coding* sequence: no gene (longest ORF exactly at random expectation), no repeats, no palindromes beyond chance, no conserved promoter/regulatory or protein motifs, no CpG island, no compositional domains, and a dinucleotide spectrum that is uniformly \"flat\" (no CpG depletion). The only named positions worth citing are the longest ORF (2,102\u20132,354), a 10-bp duplication (486\u2013495 / 1,261\u20131,270) and a 12-bp inverted-repeat pair (1,601 and 2,911) \u2014 none of which is statistically significant.\n\n*Caveat:* these are intrinsic (composition/ORF/repeat) analyses only. I could not do a database similarity search here, so a short unannotated functional element (e.g., a small non-coding RNA or a regulatory element) cannot be formally excluded \u2014 but there is no signal in the sequence itself to suggest one.",
+  "nt_run_from_tools": 1961,
+  "provider": "opencode-go",
+  "rep": 2,
+  "claims": {
+    "claims_repeat_array": false,
+    "unit_length": null,
+    "copy_number": null,
+    "start": null,
+    "end": null,
+    "supporting_quote": null,
+    "other_notable_features": [
+      "uniformly flat dinucleotide spectrum (no CpG depletion), described as a hallmark of a randomly generated sequence"
+    ]
+  },
+  "judge_model": "kimi-k2.7-code"
+}

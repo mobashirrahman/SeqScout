@@ -1,0 +1,475 @@
+{
+  "started_at": "2026-10-06T00:03:05+00:00",
+  "prompt_hash": "6548b398e9a9",
+  "code_hash": "7c7d70e28d52",
+  "locus": "region_009",
+  "condition": "inline",
+  "model": "glm-5.3-flash",
+  "effort": null,
+  "read_default": 2000,
+  "max_turns": 20,
+  "tool_calls": [
+    {
+      "turn": 0,
+      "name": "read_file",
+      "input": {
+        "path": "region.fasta",
+        "length": 200
+      },
+      "is_error": false,
+      "output_chars": 227,
+      "nt_run": 186
+    },
+    {
+      "turn": 0,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq_lines = []\nwith open(\"region.fasta\") as f:\n    header = f.readline().strip()\n    for line in f:\n        seq_lines.append(line.strip())\nseq = \"\".join(seq_lines).upper()\nprint(\"Header:\", header)\nprint(\"Length:\", len(seq))\nfrom collections import Counter\nc = Counter(seq)\nprint(\"Composition:\", dict(c))\ngc = (c.get('G',0)+c.get('C',0))/len(seq)*100\nprint(\"GC%%: %.2f\" % gc)\n# CpG observed/expected\ncpg = seq.count(\"CG\")\nexp = c.get('C',0)*c.get('G',0)/len(seq)\nprint(\"CpG count:\", cpg, \"CpG o/e: %.2f\" % (cpg/exp))\n"
+      },
+      "is_error": false,
+      "output_chars": 127,
+      "nt_run": 0
+    },
+    {
+      "turn": 1,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq_lines = []\nwith open(\"region.fasta\") as f:\n    f.readline()\n    for line in f:\n        seq_lines.append(line.strip())\nseq = \"\".join(seq_lines).upper()\n\ndef revcomp(s):\n    return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\n\n# GC in sliding windows\nprint(\"GC% by 250bp window:\")\nfor i in range(0, len(seq), 250):\n    w = seq[i:i+250]\n    gc = (w.count('G')+w.count('C'))/len(w)*100\n    print(f\"  {i+1:5d}-{i+len(w):5d}: {gc:5.1f}\")\n"
+      },
+      "is_error": false,
+      "output_chars": 273,
+      "nt_run": 0
+    },
+    {
+      "turn": 2,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq_lines = []\nwith open(\"region.fasta\") as f:\n    f.readline()\n    for line in f:\n        seq_lines.append(line.strip())\nseq = \"\".join(seq_lines).upper()\nL = len(seq)\n\n# Fine-grained GC boundaries\nw = 50\nprint(\"Fine GC scan (200bp rolling):\")\nvals = []\nfor i in range(0, L-200, 50):\n    s = seq[i:i+200]\n    gc = (s.count('G')+s.count('C'))/len(s)*100\n    vals.append((i+1, gc))\n# print transition regions\nfor pos, gc in vals:\n    if 1000 <= pos <= 2300 and (pos % 100 == 1):\n        print(f\"  {pos:5d}: {gc:5.1f}\")\n\ndef revcomp(s):\n    return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\n\n# Exact boundaries: find where 100bp windows drop below 40% / rise above 45%\nlow = []\nfor i in range(0, L-100):\n    s = seq[i:i+100]\n    gc = (s.count('G')+s.count('C'))\n    low.append((i+1, gc))\n# find contiguous stretch with gc<40 using 100bp windows every 10\nblocks = []\ni = 0\nstep = 10\nin_at = False\nstart = 0\nfor i in range(0, L-100, step):\n    s = seq[i:i+100]\n    gc = (s.count('G')+s.count('C'))/100\n    atlike = gc < 0.40\n    if atlike and not in_at:\n        start = i+1; in_at = True\n    elif not atlike and in_at:\n        blocks.append((start, i+100)); in_at = False\nif in_at: blocks.append((start, L))\nprint(\"\\nAT-rich blocks (100bp windows <40% GC):\", blocks)\n"
+      },
+      "is_error": false,
+      "output_chars": 335,
+      "nt_run": 0
+    },
+    {
+      "turn": 3,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq_lines = []\nwith open(\"region.fasta\") as f:\n    f.readline()\n    for line in f:\n        seq_lines.append(line.strip())\nseq = \"\".join(seq_lines).upper()\n\ndef revcomp(s):\n    return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\n\nstops = {\"TAA\",\"TAG\",\"TGA\"}\n\ndef sixframe(s):\n    out=[]\n    for strand, ss in ((\"+\", s), (\"-\", revcomp(s))):\n        for frame in range(3):\n            i=frame\n            while i+2 < len(ss):\n                codon = ss[i:i+3]\n                if codon in stops:\n                    i += 3\n                    continue\n                # start ORF scan\n                j=i\n                orfs=[]\n                while j+2 < len(ss):\n                    if ss[j:j+3] in stops:\n                        out.append((strand, frame, i, j, ss[i:j+3]))\n                        j+=3\n                        break\n                    j+=3\n                else:\n                    out.append((strand, frame, i, len(ss)-((len(ss)-i)%3), ss[i:]))\n                    break\n                i=j\n    return out\n\n# find ORFs >=150 aa between stops, requiring valid start codon scan (report longest between stop pairs)\ndef orfs_between_stops(s, minlen=120):\n    res=[]\n    for strand, ss in ((\"+\", s), (\"-\", revcomp(s))):\n        for frame in range(3):\n            pos=frame\n            seg_start=frame\n            stop_pos=[]\n            while pos+2 < len(ss):\n                if ss[pos:pos+3] in stops:\n                    stop_pos.append(pos)\n                pos+=3\n            prev = -3\n            for sp in stop_pos:\n                orf_len = sp - prev - 3  # codons between prev stop and this stop\n                start_off = prev+3\n                if orf_len >= minlen:\n                    nt = ss[start_off:sp]\n                    res.append((strand, frame, start_off, sp-3+3, orf_len//3, nt))\n                prev = sp\n            # trailing partial ORF\n            if len(ss) - (prev+3) >= minlen*3:\n                nt = ss[prev+3:]\n                if not any(c in stops for c in [nt[i:i+3] for i in range(0,len(nt)-3,3)]):\n                    res.append((strand, frame, prev+3, len(ss), len(nt)//3, nt))\n    return res\n\nres = orfs_between_stops(seq, minlen=100)\nres.sort(key=lambda r: -r[4])\nprint(\"Longest ORFs between stops (min 100 aa):\")\nfor r in res[:20]:\n    strand, frame, a, b, aa, nt = r\n    starts = [i for i in range(0,len(nt)-3,3) if nt[i:i+3] in (\"ATG\",\"GTG\",\"TTG\")]\n    print(f\"  strand {strand} frame {frame} len {aa} aa  (nt span {a}-{b} {'rev' if strand=='-' else ''}) \"\n          f\"starts:{starts[:6]}\")\n"
+      },
+      "is_error": false,
+      "output_chars": 1501,
+      "nt_run": 0
+    },
+    {
+      "turn": 4,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq_lines = []\nwith open(\"region.fasta\") as f:\n    f.readline()\n    for line in f:\n        seq_lines.append(line.strip())\nseq = \"\".join(seq_lines).upper()\nL = len(seq)\n\n# 1) Direct/inverted repeats via quick k-mer repeat scan (k = 12..20, find repeated words)\nfrom collections import defaultdict\nprint(\"Repeated k-mers (k>=14), occurrences:\")\nfor k in (14, 16, 20):\n    d = defaultdict(list)\n    for i in range(L-k+1):\n        d[seq[i:i+k]].append(i+1)\n    reps = {kmer:pos for kmer,pos in d.items() if len(pos) > 1}\n    print(f\"  k={k}: {len(reps)} repeated distinct k-mers\")\n    for kmer, pos in list(reps.items())[:20]:\n        print(f\"     {kmer}  at {pos}\")\n\n# 2) Homopolymer / dinucleotide microsatellite runs\nprint(\"\\nLongest homopolymers (>=6):\")\nimport re\nfor m in re.finditer(r'(A{6,}|T{6,}|G{6,}|C{6,})', seq):\n    print(f\"  {m.group(0)[0]}x{len(m.group(0))} at {m.start()+1}-{m.end()}\")\nprint(\"\\n(AT)n / (TA)n runs >=8:\")\nfor m in re.finditer(r'(?:AT){8,}|(?:TA){8,}', seq):\n    print(f\"  {m.group(0)} at {m.start()+1}-{m.end()}\")\n"
+      },
+      "is_error": false,
+      "output_chars": 330,
+      "nt_run": 0
+    },
+    {
+      "turn": 5,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq_lines = []\nwith open(\"region.fasta\") as f:\n    f.readline()\n    for line in f:\n        seq_lines.append(line.strip())\nseq = \"\".join(seq_lines).upper()\nL=len(seq)\ndef revcomp(s): return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\nrc = revcomp(seq)\n\nfrom collections import defaultdict\n# longest repeated exact words (direct)\nbest=[]\nfor k in range(20, 5, -1):\n    d=defaultdict(list)\n    for i in range(L-k+1):\n        d[seq[i:i+k]].append(i+1)\n    reps=[(km,p) for km,p in d.items() if len(p)>1]\n    if reps:\n        print(f\"Longest direct repeat length = {k}; {len(reps)} examples:\")\n        for km,p in sorted(reps, key=lambda x:-len(x[1]))[:10]:\n            print(f\"   {km}  x{len(p)} at {p}\")\n        break\n\n# longest inverted repeats (word == its own revcomp occurrence elsewhere)\nprint(\"\\nInverted repeats (word occurrences in + and - orientation):\")\nfor k in range(16, 7, -1):\n    d=defaultdict(lambda: defaultdict(list))\n    for seqname, s in ((\"+\", seq), (\"-\", rc)):\n        for i in range(L-k+1):\n            w=s[i:i+k]\n            pos = i+1 if seqname==\"+\" else L-(i+k)+1\n            d[w][seqname].append(pos)\n    found=[(w,v) for w,v in d.items() if len(v)>1]\n    if found:\n        print(f\"Longest inverted repeat = {k}; {len(found)} examples:\")\n        for w,v in sorted(found, key=lambda x:(min(len(vv) for vv in x[1].values())), reverse=True)[:8]:\n            print(f\"   {w}   {dict(v)}\")\n        break\n"
+      },
+      "is_error": false,
+      "output_chars": 320,
+      "nt_run": 0
+    },
+    {
+      "turn": 6,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq_lines = []\nwith open(\"region.fasta\") as f:\n    f.readline()\n    for line in f:\n        seq_lines.append(line.strip())\nseq = \"\".join(seq_lines).upper()\nL=len(seq)\n\ndef show(a,b,label):\n    print(f\"--- {label} ({a}-{b}) ---\")\n    for i in range(a-1,b,60):\n        print(f\"{i+1:5d} {seq[i:i+60]}\")\n\nshow(1130,1300,\"junction start of AT-rich\")\nshow(1900,2050,\"junction end of AT-rich\")\n\n# GATC counts per 500 bp\nprint(\"\\nGATC counts per 300bp window:\")\nfor i in range(0,L,300):\n    w=seq[i:i+300]\n    print(f\"  {i+1:5d}: {w.count('GATC')}\")\n\n# perfect palindromes >= 10bp (hairpin stems)\ndef rc(s): return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\nprint(\"\\nPerfect palindromes of length>=10:\")\nfor k in range(16,9,-1):\n    found=False\n    for i in range(L-k+1):\n        w=seq[i:i+k]\n        if w==rc(w):\n            print(\"   \",i+1,w, \"len\",k); found=True\n    if found: break\n"
+      },
+      "is_error": false,
+      "output_chars": 697,
+      "nt_run": 60
+    },
+    {
+      "turn": 7,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq_lines = []\nwith open(\"region.fasta\") as f:\n    f.readline()\n    for line in f:\n        seq_lines.append(line.strip())\nseq = \"\".join(seq_lines).upper()\nL=len(seq)\n\nprint(\"GC% per 100bp:\")\nfor i in range(0,L,100):\n    w=seq[i:i+100]\n    gc=(w.count('G')+w.count('C'))/len(w)*100\n    print(f\"  {i+1:5d}-{i+100:5d}: {gc:5.1f} {'#'*int(gc/2)}\")\n"
+      },
+      "is_error": false,
+      "output_chars": 1363,
+      "nt_run": 0
+    },
+    {
+      "turn": 8,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq_lines = []\nwith open(\"region.fasta\") as f:\n    f.readline()\n    for line in f:\n        seq_lines.append(line.strip())\nseq = \"\".join(seq_lines).upper()\nL=len(seq)\n\n# Precise transitions: GC per 20bp with step 5 in the transition zones\nprint(\"Transition detail:\")\nfor i in range(1050, 1280, 20):\n    w=seq[i:i+20]\n    gc=(w.count('G')+w.count('C'))/20*100\n    print(f\"  {i+1:5d}-{i+20:5d}: {gc:5.0f}  {'#'*int(gc/5)}\"\n)\nfor i in range(1850, 2100, 20):\n    w=seq[i:i+20]\n    gc=(w.count('G')+w.count('C'))/20*100\n    print(f\"  {i+1:5d}-{i+20:5d}: {gc:5.0f}  {'#'*int(gc/5)}\")\n"
+      },
+      "is_error": false,
+      "output_chars": 796,
+      "nt_run": 0
+    },
+    {
+      "turn": 9,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq_lines = []\nwith open(\"region.fasta\") as f:\n    f.readline()\n    for line in f:\n        seq_lines.append(line.strip())\nseq = \"\".join(seq_lines).upper()\nL=len(seq)\n\nregions = {\"GC-rich 5' flank\":[1,1150], \"AT-rich mid\":[1151,2000], \"GC-rich 3' flank\":[2001,3000]}\ndef rc(s): return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\n\nprint(f\"{'Motif':<10} {'5prev%':>7} {'AT-rich%':>8} {'3 flank%':>8}   counts(5',AT,3')\")\nfor motif in [\"ATGATC\",\"GATC\",\"CTAG\",\"GATAG\", \"TAAAAT\",\"TTTAAA\", \"TAAAAA\",\"TTTTTA\",\"ATAAA\",\"TTTAT\", \"TGAAT\",\"ATTCA\", \"TTGACA\",\"TATAAT\", \"AAGGAG\", \"CCNCC\"]:\n    if \"N\" in motif: continue\n    c1=seq[0:1150].count(motif); c2=seq[1150:2000].count(motif); c3=seq[2000:3000].count(motif)\n    l1,l2,l3 = 1150, 850, 1000\n    print(f\"{motif:<10} {c1/l1*100:7.2f} {c2/l2*100:8.2f} {c3/l3*100:8.2f}   {c1:3d} {c2:3d} {c3:3d}\")\n"
+      },
+      "is_error": false,
+      "output_chars": 821,
+      "nt_run": 0
+    },
+    {
+      "turn": 10,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq_lines = []\nwith periodicity check:"
+      },
+      "is_error": false,
+      "output_chars": 119,
+      "nt_run": 0
+    },
+    {
+      "turn": 11,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq_lines = []\nwith open(\"region.fasta\") as f:\n    f.readline()\n    for line in f:\n        seq_lines.append(line.strip())\nseq = \"\".join(seq_lines).upper()\nL=len(seq)\nN=len(seq)-2\ncounts=[seq.count(x) for x in (\"A\",\"C\",\"G\",\"T\")]\nexp=[c/N for c in counts]\n\ndef autocorr(seq, lag):\n    n=0; m=0\n    for i in range(len(seq)-lag):\n        a=seq[i]; b=seq[i+lag]\n        va = 1 if a in \"GC\" else -1\n        vb = 1 if b in \"GC\" else -1\n        n += va*vb; m += 1\n    r = n/m\n    # pearson-style: subtract product of means? do proper pearson:\n    import statistics\n    xs=[]; ys=[]\n    for i in range(len(seq)-lag):\n        va = 1 if seq[i] in \"GC\" else -1\n        vb = 1 if seq[i+lag] in \"GC\" else -1\n        xs.append(va); ys.append(vb)\n    mx=sum(xs)/len(xs); my=sum(ys)/len(ys)\n    num=sum((x-mx)*(y-my) for x,y in zip(xs,ys))\n    den=(sum((x-mx)**2 for x in xs)*sum((y-my)**2 for y in ys))**0.5\n    return num/den\n\nfor name, sub in [(\"GC-rich 5' flank (1-1150)\", seq[:1150]),\n                  (\"AT-rich mid (1151-2000)\", seq[1150:2000]),\n                  (\"GC-rich 3' flank (2001-3000)\", seq[2000:])]:\n    print(f\"{name}:\")\n    for lag in (1,2,3,4,10,11,12):\n        print(f\"   lag {lag:2d}: r = {autocorr(sub, lag):+.3f}\")\n"
+      },
+      "is_error": false,
+      "output_chars": 544,
+      "nt_run": 0
+    },
+    {
+      "turn": 12,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq_lines = []\nwith open(\"region.fasta\") as f:\n    f.readline()\n    for line in f:\n        seq_lines.append(line.strip())\nseq = \"\".join(seq_lines).upper()\nL=len(seq)\n\ndef di_counts(s):\n    d={}\n    for a in \"ACGT\":\n        for b in \"ACGT\":\n            d[a+b]=s.count(a+b)\n    return d\n\nfor name, sub in [(\"GC-rich 5' flank (1-1150)\", seq[:1150]),\n                  (\"AT-rich mid (1151-2000)\", seq[1150:2000]),\n                  (\"GC-rich 3' flank (2001-3000)\", seq[2000:])]:\n    d=di_counts(sub)\n    n=len(sub)-1\n    order=sorted(d.items(), key=lambda x:-x[1])[:6]\n    low=sorted(d.items(), key=lambda x:x[1])[:3]\n    print(f\"\\n{name}:\")\n    print(\"  top dinucs:\", \", \".join(f\"{k} {v*100/n:.2f}%\" for k,v in order))\n    print(\"  bottom   :\", \", \".join(f\"{k} {v*100/n:.2f}%\" for k,v in low))\n"
+      },
+      "is_error": false,
+      "output_chars": 431,
+      "nt_run": 0
+    },
+    {
+      "turn": 13,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq_lines = []\nwith open(\"region.fasta\") as f:\n    f.readline()\n    for line in f:\n        seq_lines.append(line.strip())\nseq = \"\".join(seq_lines).upper()\nL=len(seq)\n\n# context around the 13-mer repeats at 2476 and 2851\ndef show(a,b,label):\n    print(f\"--- {label} ---\")\n    for i in range(a-1,b,60):\n        print(f\"{i+1:5d} {seq[i:i+60]}\")\nshow(2441,2521,\"around 2476 repeat\")\nshow(2816,2900,\"around 2851 repeat\")\n\n# check for near-identity of flanking 40bp around each 13mer\nfor k,center in [(13, 2476), (13, 2851)]:\n    a=seq[center-21:center+21]\n    b=seq[center-21+375:center+21+375]\n    ident=sum(1 for x,y in zip(a,b) if x==y)\n    print(f\"\\n41bp around each 13-mer site: identity {ident}/41\")\n\n# short repeats bridging the two junctions\nprint(\"\\nShort 5-7bp motifs shared between junction regions:\")\nj1 = seq[1080:1220]; j2 = seq[1940:2080]\nfrom collections import defaultdict\nd=defaultdict(list)\nfor k in (5,6,7):\n    for i in range(len(j1)-k):\n        d[j1[i:i+k]].append((\"J1\",1080+i+1))\n    for i in range(len(j2)-k):\n        d[j2[i:i+k]].append((\"J2\",1940+i+1))\n    shared=[(w,p) for w,p in d.items() if len(set(x[0] for x in p))>1]\n    if shared:\n        print(f\" k={k}: {len(shared)} shared motifs\")\n        for w,p in list(shared)[:12]:\n            print(f\"   {w} at {p}\")\n"
+      },
+      "is_error": false,
+      "output_chars": 2221,
+      "nt_run": 60
+    },
+    {
+      "turn": 14,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq_lines = []\nwith open(\"region.fasta\") as f:\n    f.readline()\n    for line in f:\n        seq_lines.append(line.strip())\nseq = \"\".join(seq_lines).upper()\nL=len(seq)\n\n# 8-mer sharing between the two junction windows (statistical test)\nj1 = seq[1080:1220]; j2 = seq[1940:2080]\nfrom collections import defaultdict\nd=defaultdict(int)\nfor i in range(len(j1)-7): d[j1[i:i+8]]+=1\nshared=[w for w in (j2[i:i+8] for i in range(len(j2)-7)) if w in d]\nprint(\"shared 8-mers between junction windows:\", shared)\n\n# stop codon usage in AT-rich vs flanks\nfor name, sub in [(\"GC-rich 5' flank\", seq[:1150]),\n                  (\"AT-rich mid\", seq[1150:2000]),\n                  (\"GC-rich 3' flank\", seq[2000:])]:\n    n=len(sub)\n    print(f\"{name}: TAA {sub.count('TAA')} ({n}, {(sub.count('TAA'))/n*3000:.1f}/3kb), \"\n          f\"TAG {sub.count('TAG')} ({sub.count('TAG')/n*3000:.1f}/3kb), \"\n          f\"TGA {sub.count('TGA')} ({sub.count('TGA')/n*3000:.1f}/3kb)\")\n\n# translate tables\nCODON = {}\nbases=\"TCAG\"\naas=\"FFLLSSSSYY**CC*LLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\ni=0\nfor a in bases:\n    for b in bases:\n        for c in bases:\n            CODON[a+b+c]=aas[i]; i+=1\n\ndef translate(s, frame=0):\n    p=[]\n    for i in range(frame, len(s)-2, 3):\n        p.append(CODON.get(s[i:i+3], \"X\"))\n    return \"\".join(p)\n\nfrom collections import Counter\nprint(\"\\nAmino acid composition of AT-rich mid, all 3 frames (as % of non-stop):\")\nfor frame in range(3):\n    p = translate(seq[1150:2000], frame)\n    c = Counter(p)\n    tot = len(p)-c.get('*',0)\n    top = [(a, v*100/tot) for a,v in c.items() if a!='*']\n    top.sort(key=lambda x:-x[1])\n    stops = c.get('*',0)\n    print(f\"  frame {frame}: stops={stops}/{len(p)}  top: \" + \", \".join(f\"{a}{v:.0f}\" for a,v in top[:6]))\n"
+      },
+      "is_error": false,
+      "output_chars": 395,
+      "nt_run": 0
+    },
+    {
+      "turn": 15,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq_lines = []\nwith open(\"region.fasta\") as f:\n    f.readline()\n    for line in f:\n        seq_lines.append(line.strip())\nseq = \"\".join(seq_lines).upper()\n\nCODON = {}\nbases = \"TCAG\"\naas = (\"FFLLSSSSYY**CC*W\"   # TixT, TixC, TixA, TixG\n       \"LLLLPPPPHHQQRRRR\"   # CAx\n       \"IIIMTTTTNNKKSSRR\"   # GAx\n       \"VVVVAAAADDEEGGGG\")  # GGx\ni = 0\nfor a in bases:\n    for b in bases:\n        for c in bases:\n            CODON[a+b+c] = aas[i]; i += 1\nassert len(CODON) == 64 and CODON[\"ATG\"] == \"M\" and CODON[\"TGG\"] == \"W\"\n\ndef translate(s, frame=0):\n    return \"\".join(CODON.get(s[i:i+3], \"X\") for i in range(frame, len(s)-2, 3))\n\nfrom collections import Counter\nprint(\"Amino acid composition of AT-rich mid (1151-2000), per frame (% of sense codons):\")\nfor frame in range(3):\n    p = translate(seq[1150:2000], frame)\n    c = Counter(p)\n    tot = len(p) - c.get('*', 0)\n    items = sorted(((a, v*100/tot) for a, v in c.items() if a != '*'), key=lambda x: -x[1])\n    print(f\"  frame {frame}: stops {c.get('*',0)}/{len(p)} | \" + \", \".join(f\"{a} {v:.0f}\" for a, v in items[:6]))\n\nprint(\"\\nSame, GC-rich 5' flank (1-1150):\")\nfor frame in range(3):\n    p = translate(seq[:1150], frame)\n    c = Counter(p)\n    tot = len(p) - c.get('*', 0)\n    items = sorted(((a, v*100/tot) for a, v in c.items() if a != '*'), key=lambda x: -x[1])\n    print(f\"  frame {frame}: stops {c.get('*',0)}/{len(p)} | \" + \", \".join(f\"{a} {v:.0f}\" for a, v in items[:6]))\n"
+      },
+      "is_error": false,
+      "output_chars": 455,
+      "nt_run": 0
+    },
+    {
+      "turn": 16,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq_lines = []\nwith open(\"region.fasta\") as f:\n    f.readline()\n    for line in f:\n        seq_lines.append(line.strip())\nseq = \"\".join(seq_lines).upper()\nL=len(seq)\nrc = str.maketrans(\"ACGT\",\"TGCA\")\n\ndef score_arm(a,b):\n    return sum(1 for x,y in zip(a,b.translate(rc)[::-1]) if x==y)/len(a)\n\nhits=[]\nfor k in (7,8,9,10,11,12):                     # arm length\n    for loop in range(3, 9):                   # loop length\n        for i in range(L - 2*k - loop + 1):\n            arm1 = seq[i:i+k]\n            arm2 = seq[i+k+loop : i+2*k+loop]\n            sc  = score_arm(arm1, arm2)        # forward hairpin: arm2 reversed-complement matches arm1\n            arm2_rc = arm2.translate(rc)[::-1]\n            m = sum(1 for x,y in zip(arm1, arm2_rc) if x==y)\n            if m >= 0.8*k:\n                # trailing T-run (terminator style) or A-run\n                aft = seq[i+2*k+loop : i+2*k+loop+12]\n                stam, stem = (aft.count('T'), aft.count('A'))\n                if stam >= 5 or stem >= 5:\n                    hits.append((i+1, i+2*k+loop, k, loop, m, stam, stem, aft))\n\nhits.sort(key=lambda h: -h[4]*h[2])\nprint(\"Hairpin-like structures with downstream A/T run:\")\nfor h in hits[:20]:\n    i,j,k,loop,m,ta,aa,aft = h\n    print(f\"  {i:5d}-{j:5d} stem {k}bp({m}/{k} match) loop {loop}  after: T={ta} A={aa} :: {aft}\")\nprint(f\"total: {len(hits)}\")\n\n# terminal repeats: first 100 vs last 100, aligned +\nprint(\"\\nFirst 25 bp:\", seq[:25])\nprint(\"Last 25 bp :\", seq[-25:])\nprint(\"First 25 rc:\", seq[:25].translate(rc)[::-1])\n"
+      },
+      "is_error": false,
+      "output_chars": 1680,
+      "nt_run": 25
+    },
+    {
+      "turn": 17,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq_lines = []\nwith open(\"region.fasta\") as f:\n    f.readline()\n    for line in f:\n        seq_lines.append(line.strip())\nseq = \"\".join(seq_lines).upper()\nL=len(seq)\n\nprint(\"GC skew (G-C)/(G+C) per 500bp, plus G%, C%:\")\nfor i in range(0, L, 500):\n    w=seq[i:i+500]\n    g,c = w.count('G'), w.count('C')\n    skew = (g-c)/(g+c) if g+c else 0\n    print(f\"  {i+1:5d}-{i+len(w):5d}: G%={g/len(w)*100:5.1f} C%={c/len(w)*100:5.1f} skew={skew:+.3f}\")\n\nprint(\"\\nTG frequency per 250bp (5' half):\")\nfor i in range(0, 1500, 250):\n    w=seq[i:i+250]\n    print(f\"  {i+1:5d}-{i+len(w):5d}: TG={w.count('TG')} ({w.count('TG')/len(w)*100:.2f}%)\")\n\n# max G-run in 5' flank\nimport re\nmx = max((len(m.group(0)), m.start()+1) for m in re.finditer(r'G+', seq[:1150]))\nprint(\"longest G-run in 5' flank:\", mx)\n"
+      },
+      "is_error": false,
+      "output_chars": 561,
+      "nt_run": 0
+    },
+    {
+      "turn": 18,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq_lines = []\nwith open(\"region.fasta\") as f:\n    f.readline()\n    for line in f:\n        seq_lines.append(line.strip())\nseq = \"\".join(seq_lines).upper()\nL=len(seq)\n\nprint(\"GC skew per 200bp in 3' region:\")\nfor i in range(1500, L, 200):\n    w=seq[i:i+200]\n    g,c = w.count('G'), w.count('C')\n    skew=(g-c)/(g+c) if g+c else 0\n    print(f\"  {i+1:5d}-{i+len(w):5d}: skew={skew:+.3f} (G={g},C={c})\")\n\n# cumulative G-C zero crossing\ncum=0; prev=0; crossings=[]\nfor i,ch in enumerate(seq):\n    prev=cum\n    cum += 1 if ch=='G' else (-1 if ch=='C' else 0)\n    if i>0 and prev*cum < 0 and (i%1000 < 20 or i%1000 > 980):\n        crossings.append(i+1)\nprint(\"\\nlast cum(G-C) zero crossing (coarse):\", crossings[-5:] if crossings else None)\nprint(\"cumulative skew start/end:\", end=\" \")\ncum=0\nvals=[]\nfor i,ch in enumerate(seq):\n    cum += 1 if ch=='G' else (-1 if ch=='C' else 0)\n    vals.append(cum)\n# print position of global max and min\nimport random\nmxv=max(vals); mnv=min(vals)\nprint(\"\\nglobal max cum at\", vals.index(mxv)+1, \"min at\", vals.index(mnv)+1)\n# print cum every 500\nfor i in range(0,3000,500):\n    print(f\"  cum at {i}: {vals[min(i,2999)]}\")\n"
+      },
+      "is_error": false,
+      "output_chars": 552,
+      "nt_run": 0
+    }
+  ],
+  "turns": [
+    {
+      "input_tokens": 2049,
+      "output_tokens": 212,
+      "cached_tokens": 0,
+      "tool_calls": 2,
+      "seconds": 1.5
+    },
+    {
+      "input_tokens": 2451,
+      "output_tokens": 281,
+      "cached_tokens": 384,
+      "tool_calls": 1,
+      "seconds": 1.7
+    },
+    {
+      "input_tokens": 2845,
+      "output_tokens": 544,
+      "cached_tokens": 2048,
+      "tool_calls": 1,
+      "seconds": 2.8
+    },
+    {
+      "input_tokens": 3547,
+      "output_tokens": 836,
+      "cached_tokens": 2432,
+      "tool_calls": 1,
+      "seconds": 3.7
+    },
+    {
+      "input_tokens": 4963,
+      "output_tokens": 699,
+      "cached_tokens": 2816,
+      "tool_calls": 1,
+      "seconds": 3.5
+    },
+    {
+      "input_tokens": 5537,
+      "output_tokens": 887,
+      "cached_tokens": 4480,
+      "tool_calls": 1,
+      "seconds": 4.7
+    },
+    {
+      "input_tokens": 6145,
+      "output_tokens": 1005,
+      "cached_tokens": 4864,
+      "tool_calls": 1,
+      "seconds": 6.7
+    },
+    {
+      "input_tokens": 6861,
+      "output_tokens": 273,
+      "cached_tokens": 5504,
+      "tool_calls": 1,
+      "seconds": 1.8
+    },
+    {
+      "input_tokens": 7549,
+      "output_tokens": 285,
+      "cached_tokens": 6144,
+      "tool_calls": 1,
+      "seconds": 1.6
+    },
+    {
+      "input_tokens": 8221,
+      "output_tokens": 448,
+      "cached_tokens": 6784,
+      "tool_calls": 1,
+      "seconds": 2.4
+    },
+    {
+      "input_tokens": 9115,
+      "output_tokens": 68,
+      "cached_tokens": 7424,
+      "tool_calls": 1,
+      "seconds": 1.3
+    },
+    {
+      "input_tokens": 9216,
+      "output_tokens": 474,
+      "cached_tokens": 8960,
+      "tool_calls": 1,
+      "seconds": 9.3
+    },
+    {
+      "input_tokens": 9997,
+      "output_tokens": 1243,
+      "cached_tokens": 9088,
+      "tool_calls": 1,
+      "seconds": 9.9
+    },
+    {
+      "input_tokens": 10540,
+      "output_tokens": 821,
+      "cached_tokens": 9216,
+      "tool_calls": 1,
+      "seconds": 5.9
+    },
+    {
+      "input_tokens": 12166,
+      "output_tokens": 2743,
+      "cached_tokens": 9984,
+      "tool_calls": 1,
+      "seconds": 20.9
+    },
+    {
+      "input_tokens": 13019,
+      "output_tokens": 656,
+      "cached_tokens": 10496,
+      "tool_calls": 1,
+      "seconds": 3.7
+    },
+    {
+      "input_tokens": 13824,
+      "output_tokens": 979,
+      "cached_tokens": 12160,
+      "tool_calls": 1,
+      "seconds": 8.4
+    },
+    {
+      "input_tokens": 15224,
+      "output_tokens": 1816,
+      "cached_tokens": 13440,
+      "tool_calls": 1,
+      "seconds": 15.4
+    },
+    {
+      "input_tokens": 15907,
+      "output_tokens": 997,
+      "cached_tokens": 13824,
+      "tool_calls": 1,
+      "seconds": 6.0
+    },
+    {
+      "input_tokens": 16303,
+      "output_tokens": 3927,
+      "cached_tokens": 0,
+      "tool_calls": 0,
+      "seconds": 23.1
+    }
+  ],
+  "request_ids": [
+    "chatcmpl-sM3CGsQcNfBFaRFSj5mDZ64gH9kBT",
+    "chatcmpl-HVKZwdD8XvE7EO10L5NHwoMGs3qWV",
+    "chatcmpl-RCxj4qTsIIgBYsTAz7LPyupOvCAFR",
+    "chatcmpl-VQ31itaX7hfvPtwZ7MJIHbHoL5Skw",
+    "chatcmpl-jC74snlZmZMvzFlFY6CvH8uXVEwcJ",
+    "chatcmpl-cx9ChDvLLizQmOMkobS38eDVmLqkW",
+    "chatcmpl-5G69emzsCkOqJXihG5HaSaC4RCFRD",
+    "chatcmpl-AeVYyMFVqrKXnvEaWcMQjkx6fSMbV",
+    "chatcmpl-LlWxVM7LKnzUXcHKtYuiHoYV587TY",
+    "chatcmpl-bcm69YHDdvQcpNGH6rzwczSN5AQhn",
+    "chatcmpl-TWqitskLH0gmiseUWm1Nx1z1yN5ZP",
+    "chatcmpl-duMqA89F9uEAtAZIuuLlwQqUc9LfC",
+    "chatcmpl-pdefcP93Lp8xpHhrp0HcZefvDkAoG",
+    "chatcmpl-nzxj4uVwCSA1nnEJl6HU6crNFU5PP",
+    "chatcmpl-I1X7ZxrTiaSfonqztpwV0s5lvVAEv",
+    "chatcmpl-AchobpjSxKlfSN9r391DYFxVbC2S9",
+    "chatcmpl-c4IL4RWkSr2daMPsWPkp4TaBGR20l",
+    "chatcmpl-j5xcGMarJEDsj0Cj45sJVwbFD5HkH",
+    "chatcmpl-QbdClrMH7aV43jGlYuphDZHfSWeGZ",
+    "chatcmpl-8bYJ5oEL53vNrYA7QeaYJadJFd3jx"
+  ],
+  "served_models": [
+    "glm-5.3-flash"
+  ],
+  "input_tokens": 175479,
+  "output_tokens": 19194,
+  "cached_tokens": 130048,
+  "status": "end_turn",
+  "forced_report": true,
+  "refusal_category": null,
+  "report": "# Report on `region_009` (region.fasta, 3000 bp)\n\n## Summary / bottom line\nThe one clear standout is **large-scale compositional mosaicism**: a ~50\u201357% GC backdrop is interrupted by an ~850 bp **AT-rich island** near the middle of the region (~1150\u20132000), with soft ~150 bp transitions on each side. The island has very low coding capacity and carries small hairpin/T-run structures at both of its edges. Beyond that, ORFs, promoter/RBS motifs, repeats, transposon/IS hallmarks, methylation motifs and microsatellites are all unremarkable, and without database comparison I cannot assign function. Details and coordinates below.\n\n## Basic composition\n- Length 3000 bp (a suspiciously round number \u2014 likely an arbitrarily bounded window, so features may extend beyond the fragment).\n- GC 46.33%; A 743, T 867, G 709, C 681. CpG observed/expected \u2248 1.11 (no methylation-related CpG/GpC depletion).\n- GC skew is mildly positive (+0.03 to +0.11) up to ~2000 and turns **negative after ~2300** (2501\u20132700: skew \u22120.17); the cumulative (G\u2212C) curve peaks at **2041**. This weak strand-composition switch could reflect a segment boundary or replication-associated change, but on its own is weak evidence.\n\n## The AT-rich island (~1150\u20132000)\n100-bp GC percentages drop from ~48\u201357% outside the island to 26\u201341% inside:\n\n| Window | GC% | | Window | GC% |\n|---|---|---|---|---|\n| 1001\u20131100 | 48 | | 1701\u20131800 | 35 |\n| **1101\u20131200** | **38** | | 1801\u20131900 | 30 |\n| 1201\u20131300 | 39 | | **1901\u20132000** | **41** |\n| 1301\u20131400 | **26** (minimum) | | 2001\u20132100 | 44 |\n| 1401\u20131500 | 38 | | 2101\u20132200 | 52 |\n| 1501\u20131600 | 33 | | 2201\u20132300 | 53 |\n| 1601\u20131700 | 31 | | | |\n\n- The GC drop and rise are **gradual (~100\u2013150 bp)** rather than step-like, with no target-site duplications, direct or inverted terminal repeats, or repeated \u226514-mers anywhere \u2014 i.e., **no hallmarks of a canonical transposon/prophage insertion** I could detect.\n- Within the island, TAA stop density is 74 per kb (vs 21/kb in the 5\u2032 flank) and short-tail distribution of every frame is normal amino-acid-wise; **the longest ORF overlapping it is only 155 aa (nt 1168\u20131633)**, so this stretch is effectively noncoding.\n- Two small stem-loop structures sit precisely at the island edges \u2014 possibly functional (terminator-like) or simply consequences of AT richness:\n  - **~1187\u20131212**: stem 11 bp (9/11 matches), 4 bp loop, T-run at 1213\u20131217.\n  - **~2036\u20132062**: stem 12 bp (10/12 matches), 3 bp loop, followed by **T8 run 2063\u20132070** (\"CTCTCGTTTTTT\") \u2014 the strongest candidate for an Rho-independent terminator-like element.\n\n## ORFs and expression signals (whole region)\n- Longest between-stop ORFs: 308 aa (minus strand, spanning ~(1)\u2013925 reading backward) and 299 aa (plus strand, ~262\u20131157). Nothing says these are real genes.\n- **Zero** canonical bacterial promoter 6-mers (TTGACA, TATAAT) and only **one** AAGGAG-like ribosome-binding motif genome-wide (in 2001\u20133000). I see no credible protein-coding gene in this fragment.\n\n## Minor/likely incidental features\n- Perfect 12-bp **palindrome GCTACTAGTAGC at 106\u2013117** \u2014 the only perfect \u226510 bp palindrome in the sequence; isolated, no associated structure.\n- Longest exact repeat: 13-mer **TCTTCCAGTTCCG at 2476\u20132488 and 2851\u20132863** (both in the GC-rich 3\u2032 flank; flanks of the two copies are unrelated, so likely coincidental).\n- TG dinucleotide is enriched in the 5\u2032 flank (peak 12.4% at 501\u2013750; ~9.8% over 1\u20131150 vs ~4\u20136% elsewhere) \u2014 a soft compositional trait, not diagnostic.\n- No GATC/CTAG/ATGATC clustering, no (AT)n microsatellites, no homopolymers >7 bp, no left terminal repeat (first and last 25 bp are unrelated).\n\n## Interpretation and caveats\nThe architecture (AT-rich island with soft edges, low ORF density, hairpins at the boundaries) is consistent with either (i) horizontally transferred and/or decayed AT-rich DNA such as a small degraded prophage/IS remnant whose markers were lost, or (ii) a low-GC regulatory/intergenic domain. It is *not* consistent with a simple transposon insertion. Without BLAST/homology searches I can only report that no internal evidence assigns a function. If you can provide species context, a database search on the island (1150\u20132000) and on the 308-aa ORF would be the next step.",
+  "nt_run_from_tools": 186,
+  "seen_intervals": [
+    [
+      1,
+      186
+    ],
+    [
+      1130,
+      1309
+    ],
+    [
+      1900,
+      2079
+    ],
+    [
+      2441,
+      2560
+    ],
+    [
+      2816,
+      2935
+    ],
+    [
+      2976,
+      3000
+    ]
+  ],
+  "tool_errors": 0,
+  "seconds": 134.9,
+  "provider": "opencode-go",
+  "rep": 2,
+  "claims": {
+    "features": [
+      {
+        "type": "other",
+        "start": 1150,
+        "end": 2000,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "AT-rich island"
+      },
+      {
+        "type": "other",
+        "start": 1187,
+        "end": 1212,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "stem-loop at 5' island edge"
+      },
+      {
+        "type": "other",
+        "start": 1213,
+        "end": 1217,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "T-run downstream of 5' stem-loop"
+      },
+      {
+        "type": "other",
+        "start": 2036,
+        "end": 2062,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "stem-loop at 3' island edge"
+      },
+      {
+        "type": "other",
+        "start": 2063,
+        "end": 2070,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "T8 run downstream of 3' stem-loop"
+      },
+      {
+        "type": "other",
+        "start": 106,
+        "end": 117,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "perfect 12-bp palindrome"
+      }
+    ],
+    "named_identity": [
+      "region_009"
+    ]
+  },
+  "judge_model": "kimi-k2.7-code"
+}

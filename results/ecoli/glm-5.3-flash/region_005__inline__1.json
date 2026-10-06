@@ -1,0 +1,460 @@
+{
+  "started_at": "2026-10-05T23:32:49+00:00",
+  "prompt_hash": "6548b398e9a9",
+  "code_hash": "7c7d70e28d52",
+  "locus": "region_005",
+  "condition": "inline",
+  "model": "glm-5.3-flash",
+  "effort": null,
+  "read_default": 2000,
+  "max_turns": 20,
+  "tool_calls": [
+    {
+      "turn": 0,
+      "name": "list_files",
+      "input": {},
+      "is_error": false,
+      "output_chars": 17,
+      "nt_run": 0
+    },
+    {
+      "turn": 0,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\"\nwith open(\"region.fasta\") as f:\n    for line in f:\n        if line.startswith(\">\"):\n            print(line.strip())\n        else:\n            seq += line.strip()\nprint(\"length:\", len(seq))\nprint(\"chars:\", set(seq))\nseq = seq.upper()\nfrom collections import Counter\nc = Counter(seq)\nprint(c)\ngc = (c['G']+c['C'])/len(seq)\nprint(\"GC:\", round(gc,4))\n# CpG observed/expected\ncpg = seq.count(\"CG\")\nexp = c['C']*c['G']/len(seq)\nprint(\"CpG o/e:\", round(cpg/exp,3))\n"
+      },
+      "is_error": false,
+      "output_chars": 129,
+      "nt_run": 0
+    },
+    {
+      "turn": 1,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\"\nwith open(\"region.fasta\") as f:\n    for line in f:\n        if not line.startswith(\">\"):\n            seq += line.strip().upper()\n\ncomp = str.maketrans(\"ACGT\",\"TGCA\")\ndef revcomp(s): return s.translate(comp)[::-1]\n\ncode = {}\nbases = \"TCAG\"\naas = \"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\ni=0\nfor b1 in bases:\n    for b2 in bases:\n        for b3 in bases:\n            code[b1+b2+b3] = aas[i]; i+=1\n\nstops = {\"TAA\",\"TAG\",\"TGA\"}\n\ndef find_orfs(s):\n    orfs=[]\n    for frame in range(3):\n        i=frame\n        while i < len(s)-2:\n            if s[i:i+3]==\"ATG\":\n                j=i\n                while j < len(s)-2:\n                    c=s[j:j+3]\n                    if c in stops:\n                        break\n                    j+=3\n                if j >= len(s)-3:  # ran off the end\n                    orfs.append((i+1, None, frame+1, len(s)-i- (len(s)-i-frame)%3 ))\n                else:\n                    orfs.append((i+1, j+3, frame+1, j-i+3))\n            i+=3\n    return orfs\n\nprint(\"=== ORFs >= 90 aa (>=270 nt), forward ===\")\nfor start, stop, frame, length in find_orfs(seq):\n    if length >= 270 and stop is not None:\n        print(start, stop, \"frame\",frame,\"len\",length, \"aa\", length//3 -1)\n\nprint(\"=== reverse strand ORFs (coords on reverse seq) ===\")\nrc = revcomp(seq)\nfor start, stop, frame, length in find_orfs(rc):\n    if length >= 270 and stop is not None:\n        # convert to forward coords\n        fs = len(rc)-stop+1; fe = len(rc)-start+1\n        print(fs, fe, \"frame\",frame,\"len\",length,\"aa\",length//3-1)\n"
+      },
+      "is_error": false,
+      "output_chars": 449,
+      "nt_run": 0
+    },
+    {
+      "turn": 2,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\"\nwith open(\"region.fasta\") as f:\n    for line in f:\n        if not line.startswith(\">\"):\n            seq += line.strip().upper()\ncomp = str.maketrans(\"ACGT\",\"TGCA\")\ndef revcomp(s): return s.translate(comp)[::-1]\nrc = revcomp(seq)\n\n# ORF 792 nt from rc 559 to 1350 (1-based inclusive on rc)\norf = rc[558:1350]\nprint(len(orf), orf[:6], orf[-3:])\ncode = {}\nbases = \"TCAG\"\naas = \"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\ni=0\nfor b1 in bases:\n    for b2 in bases:\n        for b3 in bases:\n            code[b1+b2+b3] = aas[i]; i+=1\nprot = \"\".join(code[orf[k:k+3]] for k in range(0,len(orf),3))\nprint(prot)\nprint(\"aa len:\", len(prot))\n# amino acid composition\nfrom collections import Counter\npc = Counter(prot)\nprint(pc)\n"
+      },
+      "is_error": false,
+      "output_chars": 483,
+      "nt_run": 0
+    },
+    {
+      "turn": 3,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\"\nwith open(\"region.fasta\") as f:\n    for line in f:\n        if not line.startswith(\">\"):\n            seq += line.strip().upper()\ncomp = str.maketrans(\"ACGT\",\"TGCA\")\ndef revcomp(s): return s.translate(comp)[::-1]\n\ndef revcomp_position(pos, L):\n    # pos: 1-based coord on forward; returns 1-based coord on revcomp\n    return L - pos + 1\nL = len(seq)\n\n# take forward segment corresponding to rc 531..1378: forward 1623..2470\nseg = seq[1622:2470]\nprint(\"seg len\", len(seg), seg[:60])\nprint(\"revcomp midpoint:\", revcomp_position(2000, L), \"-> position 2000 on forward is\", revcomp_position(2000,L), \"on rc\")\n# in-frame stops in codons shared between the two strands: TAA/TAG/TGA on one is TTA/CTA/TCA on the other\nshared = {'TAA','TTA','TAG','CTA','TGA','TCA'}\n\n# find runs with no shared stops, allowing any starting offset\ndef longest_nostop(s):\n    best=(0,0)\n    n=len(s)\n    for start in range(n-2):\n        j=start\n        while j < n-2:\n            if s[j:j+3] in shared:\n                break\n            j+=3\n        run = j-start\n        if run > best[1]-best[0]:\n            best=(start,j)\n    return best\n\nstart,end = longest_nostop(rc)\nprint(\"longest stop-free run on rc:\", start+1, end, \"len\", end-start)\n"
+      },
+      "is_error": false,
+      "output_chars": 259,
+      "nt_run": 60
+    },
+    {
+      "turn": 4,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\"\nwith open(\"region.fasta\") as f:\n    for line in f:\n        if not line.startswith(\">\"):\n            seq += line.strip().upper()\ncomp = str.maketrans(\"ACGT\",\"TGCA\")\ndef revcomp(s): return s.translate(comp)[::-1]\nrc = revcomp(seq)\nshared = {'TAA','TTA','TAG','CTA','TGA','TCA'}\n\ndef longest_nostop(s):\n    best=(0,0)\n    n=len(s)\n    for start in range(n-2):\n        j=start\n        while j < n-2:\n            if s[j:j+3] in shared:\n                break\n            j+=3\n        if j-start > best[1]-best[0]:\n            best=(start,j)\n    return best\n\nstart,end = longest_nostop(rc)\nprint(\"longest stop-free run on rc:\", start+1, end, \"len\", end-start)\norf=rc[start:end]\nprint(orf[:3], orf[-3:])\nprint(orf)\n"
+      },
+      "is_error": false,
+      "output_chars": 608,
+      "nt_run": 555
+    },
+    {
+      "turn": 5,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\"\nwith open(\"region.fasta\") as f:\n    for line in f:\n        if not line.startswith(\">\"):\n            seq += line.strip().upper()\nL = len(seq)\ncomp = str.maketrans(\"ACGT\",\"TGCA\")\ndef revcomp(s): return s.translate(comp)[::-1]\nrc = revcomp(seq)\ncode = {}\nbases = \"TCAG\"\naas = \"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\ni=0\nfor b1 in bases:\n    for b2 in bases:\n        for b3 in bases:\n            code[b1+b2+b3] = aas[i]; i+=1\n\n# Proper ORF finder on rc from ATG to the FIRST downstream stop, using only the actual reading frame\ndef find_orfs(s):\n    res=[]\n    for frame in range(3):\n        i=frame\n        while i+2 < len(s):\n            if s[i:i+3]==\"ATG\":\n                j=i\n                while j+2 < len(s):\n                    if s[j:j+3] in (\"TAA\",\"TAG\",\"TGA\"):\n                        break\n                    j+=3\n                if j+2 < len(s):  # found a stop (not run-off-end)\n                    res.append((i, j+2))  # 0-based inclusive\n                else:\n                    res.append((i, None))  # incomplete at 3' end\n            i+=3\n    return res\n\nfor s,e in find_orfs(rc):\n    if e and e-s+1 >= 270:\n        prot = \"\".join(code[rc[k:k+3]] for k in range(s,e+1,3))\n        # convert to forward strand coordinates: rc position p (0-based) -> forward pos L-p\n        f_s = L - e      # 0-based forward start of ORF\n        f_e = L - s - 1  # 0-based forward end of ORF\n        print(\"ORF on rc:\", s+1, \"->\", e+1, \"(1-based rc)\")\n        print(\"   forward-strand coords:\", f_s+1, \"-\", f_e+1)\n        print(\"   length nt:\", e-s+1, \" aa:\", len(prot)-1)\n        print(\"   protein:\", prot)\n        print()\n"
+      },
+      "is_error": false,
+      "output_chars": 2664,
+      "nt_run": 0
+    },
+    {
+      "turn": 6,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\"\nwith open(\"region.fasta\") as f:\n    for line in f:\n        if not line.startswith(\">\"):\n            seq += line.strip().upper()\nL = len(seq)\ncomp = str.maketrans(\"ACGT\",\"TGCA\")\ndef revcomp(s): return s.translate(comp)[::-1]\nrc = revcomp(seq)\ncode = {}\nbases = \"TCAG\"; aas = \"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\ni=0\nfor b1 in bases:\n    for b2 in bases:\n        for b3 in bases:\n            code[b1+b2+b3]=aas[i]; i+=1\n\ndef is_protein_like(prot):\n    body = prot[:-1]\n    stopterm = 1 if prot.endswith('*') else 0\n    body_stops = body.count('*')\n    if body_stops>0: return 0\n    if body.endswith('*'): return 0\n    return 1\n\n# Collect all ORFs and score them\ndef find_orfs(s):\n    res=[]\n    for frame in range(3):\n        i=frame\n        while i+2 < len(s):\n            if s[i:i+3]==\"ATG\":\n                j=i\n                while j+2 < len(s):\n                    if s[j:j+3] in (\"TAA\",\"TAG\",\"TGA\"): break\n                    j+=3\n                if j+2 < len(s):\n                    res.append((i,j+2))\n                else:\n                    res.append((i,None))\n            i+=3\n    return res\n\ncands=[]\nfor strand,s in ((seq,'+'),(rc,'-')):\n    for a,b in find_orfs(s):\n        if b and b-a+1>=240:\n            prot=\"\".join(code[s[k:k+3]] for k in range(a,b+1,3))\n            if is_protein_like(prot):\n                c = sum(1 for x in prot[:-1] if x not in '*')/len(prot[:-1])\n                # simple \"codingness\" score: proportion of Ala-Asp-Glu-Gly-Val-Leu-Ser\n                agpkt = sum(prot[:-1].count(x) for x in \"ADEGLS\")/len(prot[:-1])\n                cands.append((strand, a, b, len(prot)-1, round(c,3), round(agpkt,3), prot))\n\ncands.sort(key=lambda x: -x[4])\nfor c in cands[:20]:\n    strand,a,b,aa,gc_,ag,p = c\n    if strand=='+':\n        coords=(a+1,b+1)\n    else:\n        coords=(L-b, L-a)\n    print(coords, strand, \"aa:\",aa, \"ADEGLS frac:\", ag, \"|\", p[:70])\n"
+      },
+      "is_error": false,
+      "output_chars": 11,
+      "nt_run": 0
+    },
+    {
+      "turn": 7,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\"\nwith open(\"region.fasta\") as f:\n    for line in f:\n        if not line.startswith(\">\"):\n            seq += line.strip().upper()\nL = len(seq)\ncomp = str.maketrans(\"ACGT\",\"TGCA\")\ndef revcomp(s): return s.translate(comp)[::-1]\nrc = revcomp(seq)\ncode = {}\nbases = \"TCAG\"; aas = \"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\ni=0\nfor b1 in bases:\n    for b2 in bases:\n        for b3 in bases:\n            code[b1+b2+b3]=aas[i]; i+=1\n\ndef find_orfs(s):\n    res=[]\n    for frame in range(3):\n        i=frame\n        while i+2 < len(s):\n            if s[i:i+3]==\"ATG\":\n                j=i\n                while j+2 < len(s):\n                    if s[j:j+3] in (\"TAA\",\"TAG\",\"TGA\"): break\n                    j+=3\n                if j+2 < len(s): res.append((i,j+2))\n                else: res.append((i,None))\n            i+=3\n    return res\n\ndef ag_frac(prot):\n    body = prot[:-1]\n    cnt = sum(body.count(x) for x in \"ADEGLS\")\n    return cnt/len(body)\n\nbest={}\nfor strand,s in ((seq,'+'),(rc,'-')):\n    for a,b in find_orfs(s):\n        if b and b-a+1>=240:\n            prot=\"\".join(code[s[k:k+3]] for k in range(a,b+1,3))\n            if '*' in prot[:-1]: continue\n            f = ag_frac(prot)\n            if strand=='+': coords=(a+1,b+1)\n            else: coords=(L-b, L-a)\n            best[(strand,coords)]=(f,prot)\n\nranked = sorted(best.items(), key=lambda kv: -kv[1][0])\nfor k,v in ranked[:20]:\n    print(k, \"ADEGLS %.3f\"%v[0], \"aa:\", len(v[1])-1)\n    print(\"  \", v[1][:100])\n    print()\n"
+      },
+      "is_error": false,
+      "output_chars": 11,
+      "nt_run": 0
+    },
+    {
+      "turn": 8,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\"\nwith open(\"region.fasta\") as f:\n    for line in f:\n        if not line.startswith(\">\"):\n            seq += line.strip().upper()\nL = len(seq)\ncomp = str.maketrans(\"ACGT\",\"TGCA\")\ndef revcomp(s): return s.translate(comp)[::-1]\nrc = revcomp(seq)\ncode = {}\nbases = \"TCAG\"; aas = \"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\ni=0\nfor b1 in bases:\n    for b2 in bases:\n        for b3 in bases:\n            code[b1+b2+b3]=aas[i]; i+=1\n\ndef find_orfs(s):\n    res=[]\n    for frame in range(3):\n        i=frame\n        while i+2 < len(s):\n            if s[i:i+3]==\"ATG\":\n                j=i\n                while j+2 < len(s):\n                    if s[j:j+3] in (\"TAA\",\"TAG\",\"TGA\"): break\n                    j+=3\n                if j+2 < len(s): res.append((i,j+2))\n                else: res.append((i,None))\n            i+=3\n    return res\n\ncnt=0\nfor strand,s in ((seq,'+'),(rc,'-')):\n    for a,b in find_orfs(s):\n        if b and b-a+1>=240:\n            prot=\"\".join(code[s[k:k+3]] for k in range(a,b+1,3))\n            body = prot[:-1]\n            if '*' in body: continue\n            if body.endswith('*'): continue\n            if len(body)<90: continue\n            cnt+=1\n            if strand=='+': coords=(a+1,b+1)\n            else: coords=(L-b, L-a)\n            ad = sum(body.count(x) for x in \"ADEGLS\")/len(body)\n            print(strand, coords, \"aa:\",len(body), \"ADEGLS %.3f\"%ad)\nprint(\"total valid:\", cnt)\n"
+      },
+      "is_error": false,
+      "output_chars": 15,
+      "nt_run": 0
+    },
+    {
+      "turn": 9,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\"\nwith open(\"region.fasta\") as f:\n    for line in f:\n        if not line.startswith(\">\"):\n            seq += line.strip().upper()\nL = len(seq)\ncomp = str.maketrans(\"ACGT\",\"TGCA\")\ndef revcomp(s): return s.translate(comp)[::-1]\nrc = revcomp(seq)\ncode = {}\nbases = \"TCAG\"; aas = \"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\ni=0\nfor b1 in bases:\n    for b2 in bases:\n        for b3 in bases:\n            code[b1+b2+b3]=aas[i]; i+=1\n\ndef find_orfs(s):\n    res=[]\n    for frame in range(3):\n        i=frame\n        while i+2 < len(s):\n            if s[i:i+3]==\"ATG\":\n                j=i\n                while j+2 < len(s):\n                    if s[j:j+3] in (\"TAA\",\"TAG\",\"TGA\"): break\n                    j+=3\n                if j+2 < len(s): res.append((i,j+2))\n                else: res.append((i,None))\n            i+=3\n    return res\n\nresults=[]\nfor strand,s in ((seq,'+'),(rc,'-')):\n    for a,b in find_orfs(s):\n        if b is None: continue\n        prot=\"\".join(code[s[k:k+3]] for k in range(a,b+1,3))\n        if not prot.endswith('*'): continue   # must terminate with stop for a complete ORF\n        body = prot[:-1]\n        if '*' in body or len(body)<90: continue\n        if strand=='+': coords=(a+1,b+1)\n        else: coords=(L-b, L-a)\n        ad = sum(body.count(x) for x in \"ADEGLS\")/len(body)\n        results.append((strand, coords, len(body), round(ad,3), body))\n\nresults.sort(key=lambda r: -r[3])\nfor strand,coords,aa,ad,body in results:\n    print(strand, coords, \"aa:\", aa, \"ADEGLS:\", ad)\n    print(\"   \", body[:110])\n    print()\n"
+      },
+      "is_error": false,
+      "output_chars": 11,
+      "nt_run": 0
+    },
+    {
+      "turn": 10,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\"\nwith open(\"region.fasta\") as f:\n    for line in f:\n        if not line.startswith(\">\"):\n            seq += line.strip().upper()\nL = len(seq)\nprint(\"L: \", L)\n# just check a few things: are there any complete ORFs?\ncomp = str.maketrans(\"ACGT\",\"TGCA\")\nrc = seq.translate(comp)[::-1]\nfor name, s in ((\"fwd\", seq), (\"rev\", rc)):\n    tot=0; good=0\n    for frame in range(3):\n        i=frame\n        while i+2 < len(s):\n            if s[i:i+3]==\"ATG\":\n                j=i; \n                while j+2 < len(s) and s[j:j+3] not in (\"TAA\",\"TAG\",\"TGA\"):\n                    j+=3\n                if j+2 < len(s):  # found stop\n                    tot+=1\n                i=j+3\n            else:\n                i+=3\n    print(name, \"total ATG->closed stops:\", tot)\n"
+      },
+      "is_error": false,
+      "output_chars": 73,
+      "nt_run": 0
+    },
+    {
+      "turn": 11,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\"\nwith open(\"region.fasta\") as f:\n    for line in f:\n        if not line.startswith(\">\"):\n            seq += line.strip().upper()\nL = len(seq)\ncomp = str.maketrans(\"ACGT\",\"TGCA\")\nrc = seq.translate(comp)[::-1]\ncode = {}\nbases = \"TCAG\"; aas = \"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\ni=0\nfor b1 in bases:\n    for b2 in bases:\n        for b3 in bases:\n            code[b1+b2+b3]=aas[i]; i+=1\n\nout=[]\nfor strand,s in ((\"fwd\", seq), (\"rev\", rc)):\n    for frame in range(3):\n        i=frame\n        while i+2 < len(s):\n            if s[i:i+3]==\"ATG\":\n                j=i\n                while j+2 < len(s) and s[j:j+3] not in (\"TAA\",\"TAG\",\"TGA\"): j+=3\n                if j+2 < len(s) and (j-i+3) >= 240:\n                    prot = \"\".join(code[s[k:k+3]] for k in range(i, j+3, 3))\n                    body = prot[:-1]\n                    if \"*\" in body:\n                        i = j+3\n                        continue\n                    if strand==\"fwd\": coords=(i+1, j+3)\n                    else: coords=(L-j, L-i)   # first base of ORF on fwd = L-(j+3)+1\n                    ad = sum(body.count(x) for x in \"ADEGLS\")/len(body)\n                    out.append((strand, coords, len(body), round(ad,3), body))\n                i = j+3\n            else:\n                i+=3\n\nout.sort(key=lambda x: -x[3])\nfor strand, coords, aa, ad, body in out:\n    print(strand, coords, \"aa:\", aa, \"ADEGLS: %.3f\"%ad)\n    print(\"   \", body[:120])\n    print()\nprint(\"num closed ORFs >=90aa:\", len(out))\n"
+      },
+      "is_error": false,
+      "output_chars": 958,
+      "nt_run": 0
+    },
+    {
+      "turn": 12,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\"\nwith open(\"region.fasta\") as f:\n    for line in f:\n        if not line.startswith(\">\"):\n            seq += line.strip().upper()\nL = len(seq)\ncomp = str.maketrans(\"ACGT\",\"TGCA\")\nrc = seq.translate(comp)[::-1]\ncode = {}\nbases = \"TCAG\"; aas = \"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\ni=0\nfor b1 in bases:\n    for b2 in bases:\n        for b3 in bases:\n            code[b1+b2+b3]=aas[i]; i+=1\n\n# top candidates with their ORF nucleotide sequences for later use\n# rev 561-1350: ORF on rc positions L-b+1 .. L-a+1 = 1651..2440\norb1 = rc[1650:2442]\norb2 = rc[1213:1578]  # rev 1424-1787\nprot1 = \"\".join(code[orb1[k:k+3]] for k in range(0,len(orb1),3))[:-1]\nprot2 = \"\".join(code[orb2[k:k+3]] for k in range(0,len(orb2),3))[:-1]\n\n# run 10-base sliding window GC on full sequence\ndef gc_windows(s, w=100):\n    vals=[]\n    for i in range(0, len(s)-w+1, 10):\n        win = s[i:i+w]\n        vals.append((i+1, (win.count('G')+win.count('C'))/w))\n    return vals\n\nvals = gc_windows(seq)\nprint(\"GC 100bp window mean:\", round(sum(v for _,v in vals)/len(vals),3))\nprint()\n# print around borders\nfor pos,g in vals:\n    print(pos, round(g,2))\n"
+      },
+      "is_error": false,
+      "output_chars": 141,
+      "nt_run": 0
+    },
+    {
+      "turn": 13,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\"\nwith open(\"region.fasta\") as f:\n    for line in f:\n        if not line.startswith(\">\"):\n            seq += line.strip().upper()\nL=len(seq)\ncomp = str.maketrans(\"ACGT\",\"TGCA\")\nrc = seq.translate(comp)[::-1]\ncode = {}\nbases = \"TCAG\"; aas = \"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\ni=0\nfor b1 in bases:\n    for b2 in bases:\n        for b3 in bases:\n            code[b1+b2+b3]=aas[i]; i+=1\norb1 = rc[1650:2442]\nprot1 = \"\".join(code[orb1[k:k+3]] for k in range(0,len(orb1),3))[:-1]\n# GC content windows over full forward seq\noutline=[]\nfor i in range(0, L-99, 10):\n    w=seq[i:i+100]\n    g=(w.count('G')+w.count('C'))/100\n    outline.append((i+1,g))\nprint(\"mean windowed GC: %.3f\"% (sum(g for _,g in outline)/len(outline)))\nprint()\nfor p,g in outline:\n    print(p, \"%.2f\"%g)\n"
+      },
+      "is_error": false,
+      "output_chars": 2824,
+      "nt_run": 0
+    },
+    {
+      "turn": 14,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\"\nwith open(\"region.fasta\") as f:\n    for line in f:\n        if not line.startswith(\">\"):\n            seq += line.strip().upper()\nL=len(seq)\ncomp = str.maketrans(\"ACGT\",\"TGCA\")\nrc = seq.translate(comp)[::-1]\ncode = {}\nbases=\"TCAG\"; aas=\"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\ni=0\nfor b1 in bases:\n    for b2 in bases:\n        for b3 in bases:\n            code[b1+b2+b3]=aas[i]; i+=1\n\norb1 = rc[1650:2442]\norb2 = rc[1213:1578]\nprot1 = \"\".join(code[orb1[k:k+3]] for k in range(0,len(orb1),3))[:-1]\nprot2 = \"\".join(code[orb2[k:k+3]] for k in range(0,len(orb2),3))[:-1]\n\n# k-mer (di-, tetra-, hexa-) usage in the two ORFs vs the rest\nfrom collections import Counter\ndef kfrac(s,k,keys):\n    c=Counter()\n    for i in range(len(s)-k+1):\n        c[s[i:i+k]]+=1\n    total=sum(c[a] for a in keys)\n    return {a:(c[a]/total if total else 0) for a in keys}\n\nrest = seq[:559] + seq[1350:]   # forward non-ORF1\nrest_rc = rc[:1650] + rc[2442:] # equivalent on rc strand... but let's compute k-mers on both strands and use canonical (sorted) form\ndef canon(s):\n    return min(s, s.translate(comp)[::-1])\n\ndef canon_k(s,k,elems):\n    c=Counter()\n    for i in range(len(s)-k+1):\n        c[canon(s[i:i+k])]+=1\n    return c\n\ndef compare(a,b,k):\n    ca=canon_k(a,k,{}); cb=canon_k(b,k,{})\n    keys=set(ca)|set(cb)\n    ta=sum(ca[x] for x in keys); tb=sum(cb[x] for x in keys)\n    res=[]\n    for x in keys:\n        fa=ca[x]/ta; fb=cb[x]/tb\n        diff = fa-fb\n        se = ((fa*(1-fa)/ta)+(fb*(1-fb)/tb))**0.5\n        res.append((abs(diff)/se if se>0 else 0, x, fa, fb, diff))\n    res.sort(reverse=True)\n    return res\n\n# Compare hexamers in frame 1 of each ORF vs rest of sequence (in-frame on each strand)\nfor name, orfs in ((\"ORF1(561-1350 rev)\", orb1), (\"ORF2(1424-1787 rev)\", orb2)):\n    # in-frame codons of the ORF\n    from collections import defaultdict\n    codon_count = defaultdict(int)\n    for k in range(0,len(orfs)-2,3):\n        codon_count[orfs[k:k+3]]+=1\n    print(name, \"top codons:\", sorted(codon_count.items(), key=lambda kv:-kv[1])[:5])\n    # RSCU-like: codon family usage\n    # count synonymous codon families\n    syn = {\n        \"L\": [\"TTA\",\"TTG\",\"CTT\",\"CTC\",\"CTA\",\"CTG\"],\n        \"R\": [\"CGT\",\"CGC\",\"CGA\",\"CGG\",\"AGA\",\"AGG\"],\n        \"S\": [\"TCT\",\"TCC\",\"TCA\",\"TCG\",\"AGT\",\"AGC\"],\n        \"A\": [\"GCT\",\"GCC\",\"GCA\",\"GCG\"],\n        \"G\": [\"GGT\",\"GGC\",\"GGA\",\"GGG\"],\n        \"P\": [\"CCT\",\"CCC\",\"CCA\",\"CCG\"],\n        \"T\": [\"ACT\",\"ACC\",\"ACA\",\"ACG\"],\n        \"V\": [\"GTT\",\"GTC\",\"GTA\",\"GTG\"],\n    }\n    for aa, codelist in syn.items():\n        tot = sum(codon_count[c] for c in codelist)\n        if tot < 15: continue\n        dist = {c: codon_count[c]/tot for c in codelist}\n        print(\"   %s (n=%d): %s\" % (aa, tot, \" \".join(\"%s=%.2f\"%(c,dist[c]) for c in sorted(dist,key=lambda x:-dist[x]))))\n    print()\n"
+      },
+      "is_error": false,
+      "output_chars": 141,
+      "nt_run": 0
+    },
+    {
+      "turn": 15,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\"\nwith open(\"region.fasta\") as f:\n    for line in f:\n        if not line.startswith(\">\"):\n            seq += line.strip().upper()\nL = len(seq)\ncomp = str.maketrans(\"ACGT\",\"TGCA\")\nrc = seq.translate(comp)[::-1]\ncode = {}\nbases=\"TCAG\"; aas=\"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\nidx=0\nfor b1 in bases:\n    for b2 in bases:\n        for b3 in bases:\n            code[b1+b2+b3]=aas[idx]; idx+=1\norb1 = rc[1650:2442]   # codon #1 = \"GTC\"\nprot1 = \"\".join(code[orb1[k:k+3]] for k in range(0,len(orb1)-2,3))\nprint(len(prot1))"
+      },
+      "is_error": false,
+      "output_chars": 4,
+      "nt_run": 0
+    },
+    {
+      "turn": 16,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\"\nwith open(\"region.fasta\") as f:\n    for line in f:\n        if not line.startswith(\">\"):\n            seq += line.strip().upper()\nL=len(seq)\ncomp = str.maketrans(\"ACGT\",\"TGCA\")\nrc = seq.translate(comp)[::-1]\ncode = {}\nbases=\"TCAG\"; aas=\"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\nidx=0\nfor b1 in bases:\n    for b2 in bases:\n        for b3 in bases:\n            code[b1+b2+b3]=aas[idx]; idx+=1\n\n# Note: our ATG-based ORF starts at rc position 1651 (1-based), i.e. offset 1650 in python 0-based.\n# That codon is ATG, not GTC!\nprint(rc[1650:1653])\n# Right, so the frame-1 \"GTC\" reading is just the alternative frame.\n# Use the ATG-based ORF:\norb1 = rc[1650:2442]\nprot1 = \"\".join(code[orb1[k:k+3]] for k in range(0,len(orb1)-2,3))[:-1]\n\nfrom collections import defaultdict\ncodon_count = defaultdict(int)\nfor k in range(0,len(orb1)-2,3):\n    codon_count[orb1[k:k+3]] += 1\nprint(prot1[:60], \"...\")\nsyn = {\n    \"Leu\": [\"TTA\",\"TTG\",\"CTT\",\"CTC\",\"CTA\",\"CTG\"],\n    \"Arg\": [\"CGT\",\"CGC\",\"CGA\",\"CGG\",\"AGA\",\"AGG\"],\n    \"Ser\": [\"TCT\",\"TCC\",\"TCA\",\"TCG\",\"AGT\",\"AGC\"],\n    \"Ala\": [\"GCT\",\"GCC\",\"GCA\",\"GCG\"],\n    \"Gly\": [\"GGT\",\"GGC\",\"GGA\",\"GGG\"],\n    \"Pro\": [\"CCT\",\"CCC\",\"CCA\",\"CCG\"],\n    \"Thr\": [\"ACT\",\"ACC\",\"ACA\",\"ACG\"],\n    \"Val\": [\"GTT\",\"GTC\",\"GTA\",\"GTG\"],\n}\nfor aa, codelist in syn.items():\n    tot = sum(codon_count[c] for c in codelist)\n    if tot < 12: continue\n    dist = {c: codon_count[c]/tot for c in codelist}\n    print(\"%s (n=%d): %s\" % (aa, tot, \" \".join(\"%s=%.2f\"%(c,dist[c]) for c in sorted(dist,key=lambda x:-dist[x]))))\n"
+      },
+      "is_error": false,
+      "output_chars": 507,
+      "nt_run": 0
+    },
+    {
+      "turn": 17,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\"\nwith open(\"region.fasta\") as f:\n    for line in f:\n        if not line.startswith(\">\"):\n            seq += line.strip().upper()\nL=len(seq)\ncomp = str.maketrans(\"ACGT\",\"TGCA\")\nrc = seq.translate(comp)[::-1]\ncode = {}\nbases=\"TCAG\"; aas=\"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\nidx=0\nfor b1 in bases:\n    for b2 in bases:\n        for b3 in bases:\n            code[b1+b2+b3]=aas[idx]; idx+=1\n\ndef scan_orfs(s):\n    res=[]\n    rnd = {\"ATG\":\"M\"}\n    for frame in range(3):\n        i=frame\n        while i+2 < len(s):\n            if s[i:i+3]==\"ATG\":\n                j=i\n                while j+2 < len(s) and s[j:j+3] not in (\"TAA\",\"TAG\",\"TGA\"): j+=3\n                if j+2 < len(s):\n                    res.append((i, j, frame))  # ATG start index, stop codon start index\n                    i = j+3\n                else:\n                    break\n            else:\n                i+=3\n    return res\n\n# For each ATG in the top candidate ORFs, characterize translation\ndef analyze(orfseq_desc):\n    pass\n\ndef run(find_start, strand_name, s, coords_fwd):\n    a,b = coords_fwd\n    # We want every ATG at positions on this strand between the given coordinate window.\n    res=[]\n    for frame in range(3):\n        i=frame\n        while i+2 < len(s):\n            if s[i:i+3]==\"ATG\" and (a-1) <= i+1 <= b-1:\n                j=i\n                while j+2 < len(s) and s[j:j+3] not in (\"TAA\",\"TAG\",\"TGA\"): j+=3\n                if j+2 < len(s):\n                    prot = \"\".join(code[s[k:k+3]] for k in range(i,j+3,3))\n                    body = prot[:-1]\n                    adj = 0\n                    if body.startswith(\"M\"):\n                        body2 = body[1:]\n                        adj = 1\n                    else:\n                        body2 = body\n                    # amino acid composition of hypothetical merged start\n                    # look for total length\n                    res.append((i+1, j+3, len(body), round(sum(1 for x in body if x in \"ADGLS\")/len(body),3), prot[:12]))\n                    i = j+3\n                else:\n                    break\n            else:\n                i+=3\n    return res\n\n# Top candidate ORF window in forward coords = 561-1350 but we want to scan a slightly wider window around it\n# Actually let's scan the whole rc from say 500 bases before and after around ORF1 region for candidate ATGs that would produce proteins ending at same stop\norb1_fwd_start, orb1_fwd_end = 561, 1350   # 1-based forward\n# Convert to rc \n# rc index corresponding to forward coord f (0-based f-1): L - f\n# The stop is at rc position 2442-2444 (0-based 2441..2443 -> 1-based 2442..2444? earlier said j+3=2442, so 1-based stop start = 2442)\n# scan rc from (2442-1000) to 2444 for ATGs\nimport sys\nres = scan_orfs_or=None\nres=[]\ni = 2442-1100  # scan ~1100 upstream on rc\nwhile i < 2441:\n    if i>=0 and rc[i:i+3]==\"ATG\":\n        j=i\n        while j+2 < len(rc) and rc[j:j+3] not in (\"TAA\",\"TAG\",\"TGA\"): j+=3\n        if j+2 < len(rc) and j <= 2450:\n            prot = \"\".join(code[rc[k:k+3]] for k in range(i,j+3,3))\n            body = prot[:-1]\n            res.append((i+1, j+1, len(body), body))\n            i = j+3\n        else:\n            i += 3\n    else:\n        i += 3\n\n# translate and get aa composition for the protein\nfrom collections import Counter\ndef aa_comp(prot):\n    c = Counter(prot)\n    L_ = len(prot)\n    return {a: round(v/L_,3) for a,v in c.most_common()}\n\nbest=[]\nfor a,b,n,body in res:\n    c = aa_comp(body)\n    # some heuristic \"coding\" score\n    # hypothetical proteins often have reasonable composition, but random frames often have high M count or high *\n    # use composition similarity to prot1\n    ref = aa_comp(prot1)\n    import math\n    sim = -sum((c.get(x,0)-ref.get(x,0))**2 for x in set(c)|set(ref))\n    best.append((sim, a, b, n, body))\nbest.sort(reverse=True)\nfor sim,a,b,n,body in best[:10]:\n    print(\"ATG at rc %d ends stop at rc %d len aa %d sim %.3f\" % (a,b,n,-sim))\n    print(\"   \", body[:100])\n    print(\"   comp:\", {k:v for k,v in sorted(aa_comp(body).items(), key=lambda kv:-kv[1])[:6]})\n"
+      },
+      "is_error": false,
+      "output_chars": 148,
+      "nt_run": 0
+    },
+    {
+      "turn": 18,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\"\nwith open(\"region.fasta\") as f:\n    for line in f:\n        if not line.startswith(\">\"):\n            seq += line.strip().upper()\nL=len(seq)\ncomp = str.maketrans(\"ACGT\",\"TGCA\")\nrc = seq.translate(comp)[::-1]\ncode = {}\nbases=\"TCAG\"; aas=\"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\nidx=0\nfor b1 in bases:\n    for b2 in bases:\n        for b3 in bases:\n            code[b1+b2+b3]=aas[idx]; idx+=1\norb1 = rc[1650:2442]\nprot1 = \"\".join(code[orb1[k:k+3]] for k in range(0,len(orb1)-2,3))[:-1]\n\nimport math\nfrom collections import Counter\ndef aa_comp(prot):\n    c = Counter(prot); return {a: v/len(prot) for a,v in c.items()}\nref = aa_comp(prot1)\n\nres=[]\ni = 2442-1100\nwhile i < 2441:\n    if i>=0 and rc[i:i+3]==\"ATG\":\n        j=i\n        while j+2 < len(rc) and rc[j:j+3] not in (\"TAA\",\"TAG\",\"TGA\"): j+=3\n        if j+2 < len(rc) and j <= 2450:\n            body = \"\".join(code[rc[k:k+3]] for k in range(i,j+3,3))[:-1]\n            res.append((i+1, j+1, len(body), body))\n            i = j+3\n        else:\n            i += 3\n    else:\n        i += 3\n\nscored=[]\nfor a,b,n,body in res:\n    c = aa_comp(body)\n    keys=set(c)|set(ref)\n    sim = sum((c.get(x,0)-ref.get(x,0))**2 for x in keys)\n    scored.append((-sim, a, b, n, body))\nscored.sort(reverse=True)\nfor sim,a,b,n,body in scored[:10]:\n    print(\"ATG rc %d -> stop rc %d  aa=%d  compdist=%.4f\"%(a,b,n,-sim))\n    print(\"   \", body[:100])\n"
+      },
+      "is_error": false,
+      "output_chars": 393,
+      "nt_run": 0
+    }
+  ],
+  "turns": [
+    {
+      "input_tokens": 2042,
+      "output_tokens": 200,
+      "cached_tokens": 0,
+      "tool_calls": 2,
+      "seconds": 3.3
+    },
+    {
+      "input_tokens": 2281,
+      "output_tokens": 557,
+      "cached_tokens": 0,
+      "tool_calls": 1,
+      "seconds": 8.2
+    },
+    {
+      "input_tokens": 2980,
+      "output_tokens": 315,
+      "cached_tokens": 1920,
+      "tool_calls": 1,
+      "seconds": 9.1
+    },
+    {
+      "input_tokens": 3539,
+      "output_tokens": 379,
+      "cached_tokens": 2176,
+      "tool_calls": 1,
+      "seconds": 5.7
+    },
+    {
+      "input_tokens": 4013,
+      "output_tokens": 231,
+      "cached_tokens": 2944,
+      "tool_calls": 1,
+      "seconds": 2.7
+    },
+    {
+      "input_tokens": 4571,
+      "output_tokens": 1171,
+      "cached_tokens": 3456,
+      "tool_calls": 1,
+      "seconds": 26.1
+    },
+    {
+      "input_tokens": 6412,
+      "output_tokens": 630,
+      "cached_tokens": 3968,
+      "tool_calls": 1,
+      "seconds": 12.6
+    },
+    {
+      "input_tokens": 7050,
+      "output_tokens": 503,
+      "cached_tokens": 4480,
+      "tool_calls": 1,
+      "seconds": 6.2
+    },
+    {
+      "input_tokens": 7561,
+      "output_tokens": 460,
+      "cached_tokens": 6400,
+      "tool_calls": 1,
+      "seconds": 8.3
+    },
+    {
+      "input_tokens": 8031,
+      "output_tokens": 500,
+      "cached_tokens": 7040,
+      "tool_calls": 1,
+      "seconds": 6.7
+    },
+    {
+      "input_tokens": 8539,
+      "output_tokens": 235,
+      "cached_tokens": 7552,
+      "tool_calls": 1,
+      "seconds": 4.6
+    },
+    {
+      "input_tokens": 8808,
+      "output_tokens": 484,
+      "cached_tokens": 7936,
+      "tool_calls": 1,
+      "seconds": 7.5
+    },
+    {
+      "input_tokens": 9828,
+      "output_tokens": 426,
+      "cached_tokens": 8704,
+      "tool_calls": 1,
+      "seconds": 11.7
+    },
+    {
+      "input_tokens": 10303,
+      "output_tokens": 302,
+      "cached_tokens": 8960,
+      "tool_calls": 1,
+      "seconds": 3.7
+    },
+    {
+      "input_tokens": 12694,
+      "output_tokens": 1015,
+      "cached_tokens": 9728,
+      "tool_calls": 1,
+      "seconds": 22.7
+    },
+    {
+      "input_tokens": 13758,
+      "output_tokens": 216,
+      "cached_tokens": 12672,
+      "tool_calls": 1,
+      "seconds": 4.1
+    },
+    {
+      "input_tokens": 13980,
+      "output_tokens": 586,
+      "cached_tokens": 13440,
+      "tool_calls": 1,
+      "seconds": 8.4
+    },
+    {
+      "input_tokens": 15697,
+      "output_tokens": 1234,
+      "cached_tokens": 0,
+      "tool_calls": 1,
+      "seconds": 59.0
+    },
+    {
+      "input_tokens": 16980,
+      "output_tokens": 522,
+      "cached_tokens": 12160,
+      "tool_calls": 1,
+      "seconds": 5.2
+    },
+    {
+      "input_tokens": 17376,
+      "output_tokens": 10165,
+      "cached_tokens": 0,
+      "tool_calls": 0,
+      "seconds": 257.1
+    }
+  ],
+  "request_ids": [
+    "chatcmpl-oxLFNjicRD0YlmGQ9lWhBCTlxHhdx",
+    "chatcmpl-cA2m6M1w0T5zzZNRPYjfAoHpag3rs",
+    "chatcmpl-1M4xFsHD1qJyzA4bJi91AWOM45Luu",
+    "chatcmpl-2BwGBfMvElR5mPmDOWfTd1bCGtlFu",
+    "chatcmpl-Q8EuGKkh2bnb1hwSEeuSaAmf0MrAr",
+    "chatcmpl-mLTNWodVLImlzQO23QtJ0pQeuGlZV",
+    "chatcmpl-JG7M6YQorYok2ZbZWiBbS2dd7AbkZ",
+    "chatcmpl-LnkqUMelmKXezZok6DQcqpVGNFlct",
+    "chatcmpl-7fQbvenZEReIBeuBi9UF6Y2VRITa9",
+    "chatcmpl-jlIQyTOrZKi2N8kQfH6pazHFNsD0z",
+    "chatcmpl-0ItAxydzlflMKbopNTgzkxGkNIAtu",
+    "chatcmpl-LgO3Gd5yV6Zs7evtNUXgFxZx4uLSx",
+    "chatcmpl-kWVIZxJLCXxboQ5l1dBDoguYFLmG8",
+    "chatcmpl-HKVC7BPM5gdE2SCoTqGnejRrWMiy5",
+    "chatcmpl-NaDTHKYefdF9TVOgwvEH2LzW2hOfZ",
+    "chatcmpl-EgpHnMDgEDpKLxSLGGF5OuucFsD29",
+    "chatcmpl-RJwXNz9miDZFFmiwklRof1XObX16r",
+    "chatcmpl-RSkrcsUOAUDTWDCASQoo1Dx2",
+    "chatcmpl-RuHFKWz3twUaPAQazV29Th6C",
+    "chatcmpl-R4cGej5M4RrGpFHkae0erGcH"
+  ],
+  "served_models": [
+    "glm-5.3-flash"
+  ],
+  "input_tokens": 176443,
+  "output_tokens": 20131,
+  "cached_tokens": 113536,
+  "status": "end_turn",
+  "forced_report": true,
+  "refusal_category": null,
+  "report": "## Report: `region.fasta` (`region_005`, 3,000 bp)\n\n### 1. Basic composition\n* Length: 3,000 bp; overall GC 45.4%; sequence contains only A/C/G/T.\n* CpG observed/expected \u2248 0.98 \u2192 no vertebrate-style CpG island.\n\n### 2. Composition is very heterogeneous in its GC content\nA 100-bp sliding window shows the region is not compositionally uniform at all:\n\n| Position (fwd) | GC content |\n|---|---|\n| 1 \u2013 ~520 | **27 \u2013 35 %** (strongly AT\u2011rich) |\n| ~530 \u2013 1,720 | **45 \u2013 62 %**, peaking around nt 870\u20131,400 (59\u201362 %) |\n| ~1,730 \u2013 2,200 | **34 \u2013 41 %** |\n| ~2,300 \u2013 2,500 | ~47 \u2013 52 % |\n| ~2,650 \u2013 2,900 | **27 \u2013 40 %** (AT-rich again) |\n\nThat is a GC-poor \u2192 GC-rich \u2192 GC-poor alternation over just 3 kb, with locally extreme values on both ends (28 % GC right next to 62 % GC around nt 1000\u20131400). This sort of mosaic is the classic signature of **compositionally distinct, horizontally acquired DNA** (e.g. a phage / plasmid / genomic-island fragment) rather than an ordinary stretch of one genome.\n\n### 3. Coding content\nFive complete ORFs of \u226590 aa are found; **all of them are on the reverse (crick) strand** (they run right-to-left relative to the FASTA as given). Forward strand contributes nothing above ~50 aa, which is a strong strand asymmetry.\n\n| Coords (fwd strand) | Strand | Length | Notes |\n|---|---|---|---|\n| 561 \u2013 1350 | \u2212 | **263 aa**, ATG\u2026TAA | Sits inside the GC-rich island. Codon usage is markedly GC-biased: Arg 80 % CGN, Thr 54 % ACG, Ala 41 % GCG, Leu 48 % CTG, Ser 47 % AGT \u2014 very different from the AT-rich flanks. |\n| 1100 \u2013 1358 | \u2212 | **86 aa**, ATG\u2026TGA | Nested/overlapping with the 263-aa ORF in a different frame. Unusually Cys+Met-rich (\u2248 31 % of residues) and very hydrophobic \u2014 could be a small membrane/metal-binding protein, though at this length it may also be spurious. |\n| 1424 \u2013 1787 | \u2212 | **121 aa**, ATG\u2026TAG | Strikingly basic at the N terminus (\u2026GPEKRRRRTTQEKIAIVQQS\u2026) with a long Ala/Glu-rich tail and no cysteine \u2014 composition typical of a small **DNA-binding protein** (partitioning / regulator-type). |\n| 2223 \u2013 2619 | \u2212 | **132 aa**, ATG\u2026TGA | Composition fairly ordinary; no obvious signal peptide or coiled-coil. |\n| 151 \u2013 574 | \u2212 | **141 aa**, ATG\u2026TGA | Composition unremarkable (Leu-rich ~13 %). Bounded by the AT-rich left flank. |\n\n### 4. Interpretation\nTaken together \u2014 one strand of the fragment carries 5 putative CDSs back-to-back, and those CDSs sit in blocks of very different GC content (a 62 % GC island in the middle flanked by ~30 % GC sequence on both sides) \u2014 the most parsimonious explanation is that this region is **not ordinary housekeeping chromosomal DNA, but a fragment of a mobile genetic element** (prophage, plasmid, or genomic island) that was integrated into an AT-rich host genome (or vice versa). The internal GC contrast further suggests the fragment itself may be a **fusion of two horizontally acquired segments**, with the compact GC-rich coding island around nt 560\u20131720 being the most obvious programme-level feature.\n\n### 5. What I did *not* do\nI analysed sequence composition, codon usage, and ORFs only \u2014 I did **not** run a BLAST/protein-domain search, look for direct/inverted repeats, terminators, ribosome-binding sites, or RNA features, so functional assignments above (e.g. the 121-aa basic protein as a DNA-binding protein) are compositional inferences, not homology-based identifications. A BLASTP search of the three larger ORFs against the nr database would be the natural next step.",
+  "nt_run_from_tools": 555,
+  "seen_intervals": [
+    [
+      1623,
+      1682
+    ]
+  ],
+  "tool_errors": 0,
+  "seconds": 473.2,
+  "provider": "opencode-go",
+  "rep": 1,
+  "claims": {
+    "features": [
+      {
+        "type": "gene",
+        "start": 561,
+        "end": 1350,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "263-aa ORF with GC-biased codon usage in GC-rich island"
+      },
+      {
+        "type": "gene",
+        "start": 1100,
+        "end": 1358,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "86-aa nested Cys/Met-rich hydrophobic ORF"
+      },
+      {
+        "type": "gene",
+        "start": 1424,
+        "end": 1787,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "121-aa basic N-terminal DNA-binding protein-like ORF"
+      },
+      {
+        "type": "gene",
+        "start": 2223,
+        "end": 2619,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "132-aa ORF of ordinary composition"
+      },
+      {
+        "type": "gene",
+        "start": 151,
+        "end": 574,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "141-aa Leu-rich ORF in AT-rich left flank"
+      },
+      {
+        "type": "other",
+        "start": 560,
+        "end": 1720,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "GC-rich coding island"
+      },
+      {
+        "type": "other",
+        "start": 1,
+        "end": 3000,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "mosaic GC-content signature of horizontally acquired DNA fragment"
+      }
+    ],
+    "named_identity": [
+      "region_005"
+    ]
+  },
+  "judge_model": "kimi-k2.7-code"
+}

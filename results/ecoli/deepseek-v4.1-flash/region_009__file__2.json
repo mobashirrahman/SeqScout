@@ -1,0 +1,461 @@
+{
+  "started_at": "2026-10-05T23:48:33+00:00",
+  "prompt_hash": "6548b398e9a9",
+  "code_hash": "7c7d70e28d52",
+  "locus": "region_009",
+  "condition": "file",
+  "model": "deepseek-v4.1-flash",
+  "effort": null,
+  "read_default": 2000,
+  "max_turns": 20,
+  "tool_calls": [
+    {
+      "turn": 0,
+      "name": "list_files",
+      "input": {},
+      "is_error": false,
+      "output_chars": 17,
+      "nt_run": 0
+    },
+    {
+      "turn": 0,
+      "name": "read_file",
+      "input": {
+        "path": "region.fasta",
+        "length": 2000
+      },
+      "is_error": false,
+      "output_chars": 2028,
+      "nt_run": 1960
+    },
+    {
+      "turn": 1,
+      "name": "read_file",
+      "input": {
+        "length": 1200,
+        "offset": 2000,
+        "path": "region.fasta"
+      },
+      "is_error": false,
+      "output_chars": 1086,
+      "nt_run": 1040
+    },
+    {
+      "turn": 2,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\"\nwith open(\"region.fasta\") as f:\n    lines = [l.strip() for l in f if l.strip() and not l.startswith(\">\")]\nseq = \"\".join(lines).upper()\nprint(\"length:\", len(seq))\nprint(\"alphabet:\", sorted(set(seq)))\nfrom collections import Counter\nc = Counter(seq)\nfor b in \"ACGT\":\n    print(b, c[b], f\"{100*c[b]/len(seq):.1f}%\")\ngc = (c['G']+c['C'])/len(seq)\nprint(\"GC content: %.1f%%\" % (100*gc))\n"
+      },
+      "is_error": false,
+      "output_chars": 110,
+      "nt_run": 0
+    },
+    {
+      "turn": 3,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\nn = len(seq)\ncomp = str.maketrans(\"ACGT\",\"TGCA\")\nrc = seq.translate(comp)[::-1]\n\ndef orfs(s, strand):\n    res=[]\n    for frame in range(3):\n        i=frame\n        start=None\n        for j in range(frame, len(s), 3):\n            cod=s[j:j+3]\n            if len(cod)<3: break\n            if cod==\"ATG\" and start is None:\n                start=j\n            if cod in (\"TAA\",\"TAG\",\"TGA\") and start is not None:\n                res.append((start,j+3,(j+3-start)//3,strand))\n                start=None\n    return res\n\nallorf = orfs(seq,\"+\")+orfs(rc,\"-\")\nallorf.sort(key=lambda x:-x[2])\nprint(\"Top ORFs (>=300 nt):\")\nfor st,en,aa,strand in allorf:\n    if en-st>=300:\n        print(f\"{strand} strand  nt {st+1}-{en}  len {en-st}  ({aa} aa)\")\n"
+      },
+      "is_error": false,
+      "output_chars": 267,
+      "nt_run": 0
+    },
+    {
+      "turn": 4,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\n\ntable = {}\nbases=\"TCAG\"\naas=\"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\ni=0\nfor a in bases:\n    for b in bases:\n        for c in bases:\n            table[a+b+c]=aas[i]; i+=1\n\ndef translate(s):\n    return \"\".join(table.get(s[i:i+3],'X') for i in range(0,len(s)-2,3))\n\nprint(\"ORF 271-1161 (+):\")\nprint(translate(seq[270:1161]))\nprint()\nprint(\"ORF 2526-2966 (+):\")\nprint(translate(seq[2525:2966]))\nprint()\nprint(\"ORF 1220-1636 (+):\")\nprint(translate(seq[1219:1636]))\nprint()\nprint(\"ORF 1650-2030 (+):\")\nprint(translate(seq[1649:2030]))\n"
+      },
+      "is_error": false,
+      "output_chars": 792,
+      "nt_run": 0
+    },
+    {
+      "turn": 5,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\nn=len(seq)\n\n# Kyte-Doolittle hydropathy, window 19, for ORF 271-1161\nkd = {'A':1.8,'R':-4.5,'N':-3.5,'D':-3.5,'C':2.5,'Q':-3.5,'E':-3.5,'G':-0.4,\n      'H':-3.2,'I':4.5,'L':3.8,'K':-3.9,'M':1.9,'F':2.8,'P':-1.6,'S':-0.8,\n      'T':-0.7,'W':-0.9,'Y':-1.3,'V':4.2}\ntable={}\nbases=\"TCAG\"; aas=\"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\ni=0\nfor a in bases:\n  for b in bases:\n    for c in bases:\n      table[a+b+c]=aas[i]; i+=1\nprot=\"\".join(table[seq[j:j+3]] for j in range(270,1161,3))[:-1]\nw=19\nhydro=[]\nfor i in range(len(prot)-w):\n    hydro.append(sum(kd[prot[i+k]] for k in range(w))/w)\n# find runs of hydro >1.6 (typical TM)\nruns=[]; s=None\nfor i,v in enumerate(hydro):\n    if v>1.6 and s is None: s=i\n    if v<=1.6 and s is not None:\n        if i-s>=15: runs.append((s+1,i+w))\n        s=None\nif s is not None and len(hydro)-s>=15: runs.append((s+1,len(hydro)+w))\nprint(\"Predicted TM-like segments (protein coords of ORF 271-1161):\")\nfor a,b in runs: print(f\"  aa {a}-{b}  ({b-a+1} aa)\")\nprint(\"number of TM segments:\", len(runs))\n\n# search simple tandem repeats (period 2-50) at nucleotide level\nprint(\"\\nTandem repeat search (period up to 40, >=3 copies):\")\nbest=[]\nfor p in range(2,41):\n    for st in range(0, n-3*p):\n        unit=seq[st:st+p]; k=1\n        while seq[st+k*p:st+(k+1)*p]==unit: k+=1\n        if k>=3 and p*k>=12:\n            best.append((p*k,st,st+k*p,unit,k))\nbest.sort(reverse=True)\nseen=set()\nfor L,st,en,u,k in best[:8]:\n    print(f\"  nt {st+1}-{en}  period {len(u)} x{k}  unit={u}\")\n"
+      },
+      "is_error": false,
+      "output_chars": 199,
+      "nt_run": 0
+    },
+    {
+      "turn": 6,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\nkd = {'A':1.8,'R':-4.5,'N':-3.5,'D':-3.5,'C':2.5,'Q':-3.5,'E':-3.5,'G':-0.4,\n      'H':-3.2,'I':4.5,'L':3.8,'K':-3.9,'M':1.9,'F':2.8,'P':-1.6,'S':-0.8,\n      'T':-0.7,'W':-0.9,'Y':-1.3,'V':4.2}\ntable={}\nbases=\"TCAG\"; aas=\"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\ni=0\nfor a in bases:\n  for b in bases:\n    for c in bases:\n      table[a+b+c]=aas[i]; i+=1\nprot=\"\".join(table[seq[j:j+3]] for j in range(270,1161,3))[:-1]\nprint(\"protein length\", len(prot))\n\nfor w in (15,17,19,21):\n    prof=[sum(kd[prot[i+k]] for k in range(w))/w for i in range(len(prot)-w+1)]\n    # peaks above 1.5, merge if within 8\n    segs=[]; s=None\n    for idx,v in enumerate(prof):\n        if v>=1.5 and s is None: s=idx\n        if v<1.5 and s is not None:\n            segs.append((s,idx+w-1)); s=None\n    if s is not None: segs.append((s,len(prof)-1+w-1))\n    # merge close\n    m=[]\n    for a,b in segs:\n        if m and a-m[-1][1]<=8: m[-1]=(m[-1][0],b)\n        else: m.append((a,b))\n    print(f\"window {w}: {len(m)} hydrophobic segments:\", [(a+1,b+1) for a,b in m])\n"
+      },
+      "is_error": false,
+      "output_chars": 311,
+      "nt_run": 0
+    },
+    {
+      "turn": 7,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\nn=len(seq)\ncomp = str.maketrans(\"ACGT\",\"TGCA\")\nrc = seq.translate(comp)[::-1]\n\n# longest exact repeats (direct) of length>=15\nfrom collections import defaultdict\ndef rep_index(s):\n    d=defaultdict(list)\n    for i in range(len(s)):\n        d[s[i:i+12]].append(i)\n    return d\n\n# find maximal exact repeats >=15bp using suffix-ish approach (k=12 seed then extend)\nseeds=defaultdict(list)\nfor i in range(n-11):\n    seeds[seq[i:i+12]].append(i)\npairs=set()\nfor k,v in seeds.items():\n    if len(v)>1:\n        for a in range(len(v)):\n            for b in range(a+1,len(v)):\n                pairs.add((v[a],v[b]))\nmaxrep=[]\nfor a,b in pairs:\n    if b-a<12: continue\n    L=12\n    while b+L<n and seq[a+L]==seq[b+L]: L+=1\n    # extend left\n    s=a; t=b\n    while s>0 and t>0 and seq[s-1]==seq[t-1]:\n        s-=1; t-=1\n    length=t-s if False else (b+L)-(a)  # approximate\n    maxrep.append(((b+L)-(s if False else a),s,a,b,L))\nmaxrep.sort(reverse=True)\nprint(\"Longest direct repeats (>=20 nt, non-overlapping):\")\nshown=0\nfor L,s,a,b,seed in maxrep:\n    if b-a>=len(seq[s:s+L]): pass\n    if L>=20 and b-a>=L:\n        print(f\"  copy1 {s+1}-{s+L}  copy2 {a+1}-{a+L}  len {L}  identity 100%\")\n        shown+=1\n        if shown>=10: break\n\n# homopolymers\nprint(\"\\nHomopolymer runs >=7:\")\nimport re\nfor m in re.finditer(r'(A{7,}|T{7,}|G{7,}|C{7,})', seq):\n    print(f\"  nt {m.start()+1}-{m.end()}  {m.group()}\")\n"
+      },
+      "is_error": false,
+      "output_chars": 98,
+      "nt_run": 0
+    },
+    {
+      "turn": 8,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\nn=len(seq)\ncomp = str.maketrans(\"ACGT\",\"TGCA\")\nrc = seq.translate(comp)[::-1]\n\ntable={}\nbases=\"TCAG\"; aas=\"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\ni=0\nfor a in bases:\n  for b in bases:\n    for c in bases:\n      table[a+b+c]=aas[i]; i+=1\ndef tr(s): return \"\".join(table.get(s[j:j+3],'X') for j in range(0,len(s)-2,3))\n\nprint(\"rev ORF (326-928):\")\nprint(tr(rc[325:928]))\nprint()\nprint(\"rev ORF (51-353):\")\nprint(tr(rc[50:353]))\nprint()\n\n# Inverted repeats: find 15-30 nt segments whose revcomp occurs elsewhere\nminv=14\nhits=[]\nfor L in range(30,13,-1):\n    seen={}\n    for i in range(n-L+1):\n        seg=seq[i:i+L]\n        r=seg.translate(comp)[::-1]\n        seen.setdefault(seg,i)\n    for i in range(n-L+1):\n        seg=seq[i:i+L]; r=seg.translate(comp)[::-1]\n        if r in seen and seen[r]!=i:\n            j=seen[r]\n            if abs(i-j)>=L:  # non-overlapping\n                hits.append((L,i,j))\nfor L,i,j in hits[:12]:\n    print(f\"inverted repeat len {L}: {i+1}-{i+L}  pairs with (revcomp) {j+1}-{j+L}  spacer {abs(j-i)}\")\n"
+      },
+      "is_error": false,
+      "output_chars": 343,
+      "nt_run": 0
+    },
+    {
+      "turn": 9,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\nn=len(seq)\ncomp = str.maketrans(\"ACGT\",\"TGCA\")\nrc = seq.translate(comp)[::-1]\ndef tr(s):\n    tbl={}\n    b=\"TCAG\"; a=\"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\n    i=0\n    for x in b:\n        for y in b:\n            for z in b:\n                tbl[x+y+z]=a[i]; i+=1\n    return \"\".join(tbl.get(s[j:j+3],'X') for j in range(0,len(s)-2,3))\n\ndef find_orfs(s):\n    out=[]\n    for frame in range(3):\n        start=None\n        j=frame\n        while j+3<=len(s):\n            cod=s[j:j+3]\n            if cod=='ATG' and start is None: start=j\n            if cod in ('TAA','TAG','TGA') and start is not None:\n                out.append((start,j+3))\n                start=None\n            j+=3\n    return out\n\nfor strand,s in ((\"+\",seq),(\"-\",rc)):\n    orfs=find_orfs(s)\n    print(f\"--- strand {strand} (coords on {s[:1] if False else strand}) ---\")\n    for st,en in sorted(orfs,key=lambda x:-(x[1]-x[0])):\n        if en-st>=90:\n            L=en-st\n            prot=tr(s[st:en])[:-1]\n            # map to original coords for minus strand\n            if strand==\"+\":\n                coords=f\"{st+1}-{en}\"\n            else:\n                coords=f\"{n-en+1}-{n-st}\"\n            frame=(st)%3\n            print(f\"  {coords:>12}  {L:4d} nt  {L//3-1:3d} aa  frame {frame}  starts {prot[:18]}...\")\n"
+      },
+      "is_error": false,
+      "output_chars": 1411,
+      "nt_run": 0
+    },
+    {
+      "turn": 10,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\ntbl={}\nb=\"TCAG\"; a=\"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\ni=0\nfor x in b:\n  for y in b:\n    for z in b:\n      tbl[x+y+z]=a[i]; i+=1\ndef tr(s): return \"\".join(tbl.get(s[j:j+3],'X') for j in range(0,len(s)-2,3))\n\nprot=tr(seq[270:1158])  # drop stop\nfrom collections import Counter\nc=Counter(prot)\nkd = {'A':1.8,'R':-4.5,'N':-3.5,'D':-3.5,'C':2.5,'Q':-3.5,'E':-3.5,'G':-0.4,\n      'H':-3.2,'I':4.5,'L':3.8,'K':-3.9,'M':1.9,'F':2.8,'P':-1.6,'S':-0.8,\n      'T':-0.7,'W':-0.9,'Y':-1.3,'V':4.2}\ngravy=sum(kd[x] for x in prot)/len(prot)\nprint(\"major ORF protein: %d aa, GRAVY = %.3f\" % (len(prot), gravy))\nhyd = \"AILMFWVY\"\nprint(\"hydrophobic (AILMFWVY) fraction: %.1f%%\" % (100*sum(c[x] for x in hyd)/len(prot)))\nprint(\"charged (DEKR) fraction: %.1f%%\" % (100*sum(c[x] for x in 'DEKR')/len(prot)))\nprint(\"top residues:\", c.most_common(10))\n\n# TM helices: window 19, peak detection\nw=19\nprof=[(i,sum(kd[prot[i+k]] for k in range(w))/w) for i in range(len(prot)-w+1)]\n# local maxima above 1.6, min separation 15\npeaks=[]\nfor idx,v in prof:\n    if v>1.6:\n        if peaks and idx-peaks[-1][0]<15:\n            if v>peaks[-1][1]: peaks[-1]=(idx,v)\n        else:\n            peaks.append((idx,v))\nprint(\"candidate TM helices (window19, center aa):\", [(p+9, round(v,2)) for p,v in peaks])\n"
+      },
+      "is_error": false,
+      "output_chars": 395,
+      "nt_run": 0
+    },
+    {
+      "turn": 11,
+      "name": "run_python",
+      "input": {
+        "code": "\nimport re\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\nn=len(seq)\ncomp=str.maketrans(\"ACGT\",\"TGCA\")\n\ndef find(pat,label):\n    hits=[(m.start()+1,m.end(),m.group()) for m in re.finditer(pat,seq)]\n    hits+=[(n-m.end()+1,n-m.start(),m.group()+\" (revcomp)\") for m in re.finditer(pat,seq.translate(comp)[::-1])]\n    if hits: print(label)\n    for h in sorted(hits)[:12]: print(\"   \",h)\n\nfind(r'TTGACA','-35 (TTGACA):')\nfind(r'TATAAT','-10 Pribnow (TATAAT):')\nfind(r'TTATCCACA','DnaA box (TTATCCACA):')\nfind(r'AGGAGG','Shine-Dalgarno (AGGAGG):')\nfind(r'AATAAA','polyA signal (AATAAA):')\n\n# hairpins: stem >=6, loop 3-12\nprint(\"\\nPotential hairpins (stem>=6bp, loop 3-12 nt):\")\ncnt=0\nfor i in range(n):\n    for stem in range(6,20):\n        for loop in range(3,13):\n            a=seq[i:i+stem]\n            if len(a)<stem: break\n            j=i+stem+loop\n            if j+stem>n: continue\n            b=seq[j:j+stem]\n            if b==a.translate(comp)[::-1]:\n                print(f\"   stem {i+1}-{i+stem} / {j+1}-{j+stem}  loop {loop}  stem {a}\")\n                cnt+=1\n    if cnt>8: break\n"
+      },
+      "is_error": false,
+      "output_chars": 925,
+      "nt_run": 0
+    },
+    {
+      "turn": 12,
+      "name": "run_python",
+      "input": {
+        "code": "\nimport random\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\nn=len(seq)\ncomp=str.maketrans(\"ACGT\",\"TGCA\")\n\ndef longest_orf(s):\n    best=0\n    for strand in (s, s.translate(comp)[::-1]):\n        for frame in range(3):\n            start=None\n            j=frame\n            while j+3<=len(s):\n                cod=strand[j:j+3]\n                if cod=='ATG' and start is None: start=j\n                if cod in ('TAA','TAG','TGA') and start is not None:\n                    best=max(best,(j+3-start)//3); start=None\n                j+=3\n    return best\n\nprint(\"longest ORF in real seq (aa):\", longest_orf(seq))\n\n# Monte Carlo with same base composition\nrandom.seed(1)\nbases=\"ACGT\"\nfrom collections import Counter\nc=Counter(seq); pool=list(seq)\nres=[]\nfor t in range(200):\n    sh=pool[:]; random.shuffle(sh)\n    res.append(longest_orf(\"\".join(sh)))\nres.sort()\nprint(\"shuffled longest-ORF (aa): mean %.1f, median %d, 95th pct %d, max %d\" % (sum(res)/len(res), res[len(res)//2], res[int(.95*len(res))], res[-1]))\nprint(\"times >= 296 aa:\", sum(1 for r in res if r>=296), \"/200\")\n\n# GC3 of major ORF\norf=seq[270:1158]\np=[orf[i::3] for i in range(3)]\ndef gc(s): return 100*(s.count('G')+s.count('C'))/len(s)\nprint(\"GC1 %.1f  GC2 %.1f  GC3 %.1f\" % (gc(p[0]),gc(p[1]),gc(p[2])))\nprint(\"overall GC %.1f\" % gc(seq))\n"
+      },
+      "is_error": false,
+      "output_chars": 174,
+      "nt_run": 0
+    },
+    {
+      "turn": 13,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\nn=len(seq); comp=str.maketrans(\"ACGT\",\"TGCA\")\ntbl={}; b=\"TCAG\"; a=\"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\ni=0\nfor x in b:\n  for y in b:\n    for z in b: tbl[x+y+z]=a[i]; i+=1\ndef tr(s): return \"\".join(tbl.get(s[j:j+3],'X') for j in range(0,len(s)-2,3))\nkd = {'A':1.8,'R':-4.5,'N':-3.5,'D':-3.5,'C':2.5,'Q':-3.5,'E':-3.5,'G':-0.4,'H':-3.2,'I':4.5,'L':3.8,'K':-3.9,'M':1.9,'F':2.8,'P':-1.6,'S':-0.8,'T':-0.7,'W':-0.9,'Y':-1.3,'V':4.2}\nrc=seq.translate(comp)[::-1]\ndef gravy(p): return sum(kd[x] for x in p)/len(p)\n\norf_list = [(\"+\",271,1161),(\"+\",2526,2966),(\"+\",1220,1636),(\"+\",1650,2030),\n            (\"-\",2073,2675),(\"-\",2648,2950),(\"-\",994,1221),(\"+\",2257,2526)]\nprint(f\"{'strand':>6} {'coords(nt)':>14} {'aa':>5} {'GRAVY':>7}\")\nfor st,c1,c2 in sorted(orf_list, key=lambda x:x[2]-x[1], reverse=True):\n    if st==\"+\":\n        s=seq[c1-1:c2]\n    else:\n        s=rc[n-c2:n-c1+1]\n    p=tr(s)[:-1]\n    print(f\"{st:>6} {c1:>6}-{c2:<6} {len(p):>5} {gravy(p):>7.2f}\")\n"
+      },
+      "is_error": false,
+      "output_chars": 316,
+      "nt_run": 0
+    },
+    {
+      "turn": 14,
+      "name": "run_python",
+      "input": {
+        "code": "\nimport random\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\nn=len(seq); comp=str.maketrans(\"ACGT\",\"TGCA\")\n\ndef orfs_coverage(s, minaa=100):\n    intervals=[]\n    for strand,sgn in ((s,1),(s.translate(comp)[::-1],-1)):\n        for frame in range(3):\n            start=None; j=frame\n            while j+3<=len(s):\n                cod=strand[j:j+3]\n                if cod=='ATG' and start is None: start=j\n                if cod in ('TAA','TAG','TGA') and start is not None:\n                    if (j+3-start)//3-1>=minaa: intervals.append((start,j+3))\n                    start=None\n                j+=3\n    return intervals\n\ndef cov(intervals,L):\n    iv=sorted(intervals); tot=0; ce=-1\n    for a,b in iv:\n        if a>ce: tot+=b-a; ce=b\n        elif b>ce: tot+=b-ce; ce=b\n    return tot, len(intervals)\n\niv=orfs_coverage(seq)\ntot,cnt=cov(iv,n)\nprint(f\"real: {cnt} ORFs >=100aa, coverage {tot} bp ({100*tot/n:.0f}%)\")\n\nrandom.seed(3); pool=list(seq); totl=[];cntl=[]\nfor t in range(100):\n    sh=pool[:]; random.shuffle(sh); sh=\"\".join(sh)\n    iv=orfs_coverage(sh); tt,cc=cov(iv,n); totl.append(tt); cntl.append(cc)\ntotl.sort()\nprint(f\"shuffled: mean ORFs {sum(cntl)/100:.1f}, mean coverage {sum(totl)/100:.0f} bp ({100*sum(totl)/100/n:.0f}%), 95th pct cov {totl[94]} bp\")\n"
+      },
+      "is_error": false,
+      "output_chars": 117,
+      "nt_run": 0
+    },
+    {
+      "turn": 15,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\nn=len(seq); comp=str.maketrans(\"ACGT\",\"TGCA\")\nrc=seq.translate(comp)[::-1]\n\ndef longest_no_stop(s, stops):\n    best=(0,0)\n    cur=0; start=0\n    for i in range(len(s)-2):\n        if i%1==0:\n            if s[i:i+3] in stops:\n                cur=0; start=i+3\n            else:\n                cur+=1\n                if cur>best[0]: best=(cur,start)\n    return best\n\nfor name,stops in [(\"standard TAA/TAG/TGA\",{'TAA','TAG','TGA'}),\n                   (\"mito (TAA/TAG only)\",{'TAA','TAG'})]:\n    b1=longest_no_stop(seq,stops)\n    b2=longest_no_stop(rc,stops)\n    print(f\"{name}: longest stop-free stretch + {b1[0]+2} codons @nt {b1[1]+1}.. ; - {b2[0]+2} codons\")\n"
+      },
+      "is_error": false,
+      "output_chars": 173,
+      "nt_run": 0
+    },
+    {
+      "turn": 16,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\nn=len(seq); comp=str.maketrans(\"ACGT\",\"TGCA\")\nrc=seq.translate(comp)[::-1]\n\ndef longest_frame(s, stops):\n    out=[]\n    for f in range(3):\n        cur=0; start=f\n        for j in range(f, len(s)-2, 3):\n            if s[j:j+3] in stops:\n                if cur>0: out.append((cur,start,j))\n                cur=0; start=j+3\n            else:\n                cur+=1\n        out.append((cur,start,len(s)))\n    out.sort(reverse=True)\n    return out[0]\n\nfor lab,stops in [(\"standard\",{'TAA','TAG','TGA'}),(\"mito TGA=W\",{'TAA','TAG'})]:\n    a=longest_frame(seq,stops); b=longest_frame(rc,stops)\n    print(f\"{lab}: + longest run {a[0]} codons (nt {a[1]+1}-{min(a[2],n)}) | - {b[0]} codons\")\n"
+      },
+      "is_error": false,
+      "output_chars": 130,
+      "nt_run": 0
+    },
+    {
+      "turn": 17,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\n# main ORF 271-1161 (1-based)\nprint(\"start codon (271-273):\", seq[270:273])\nprint(\"context before start (nt 251-282):\", seq[250:282])\nprint(\"stop codon (1159-1161):\", seq[1158:1161])\nprint(\"context after stop (nt 1150-1185):\", seq[1149:1185])\n# upstream in-frame stops in frame 0 before 271\nframe0 = [seq[i:i+3] for i in range(0, 271-1, 3)]\nprint(\"last few frame0 codons before start:\", frame0[-8:])\n# first codon of frame0\nprint(\"first codons frame0:\", frame0[:6])\n"
+      },
+      "is_error": false,
+      "output_chars": 353,
+      "nt_run": 36
+    },
+    {
+      "turn": 18,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\nn=len(seq); comp=str.maketrans(\"ACGT\",\"TGCA\")\nrc=seq.translate(comp)[::-1]\n\n# direct repeats: exact matches >=20, any positions\nbest_direct=[]\nfor L in range(60,19,-1):\n    d={}\n    found=False\n    for i in range(n-L+1):\n        seg=seq[i:i+L]\n        if seg in d:\n            best_direct.append((L,d[seg]+1,i+1)); found=True\n        else:\n            d[seg]=i\n    if found: break\nprint(\"longest exact direct repeat:\", best_direct[:3] if best_direct else \"none >=20 bp\")\n\n# inverted repeats: seg vs revcomp elsewhere, >=16, non-overlapping\nbest_inv=[]\nfor L in range(60,15,-1):\n    d={}\n    for i in range(n-L+1):\n        d.setdefault(seq[i:i+L],i)\n    found=False\n    for i in range(n-L+1):\n        r=seq[i:i+L].translate(comp)[::-1]\n        if r in d and abs(d[r]-i)>=L:\n            best_inv.append((L,i+1,d[r]+1)); found=True\n    if found: break\nprint(\"longest inverted repeat (non-overlapping):\", best_inv[:3] if best_inv else \"none >=16 bp\")\n\n# GC in 500bp windows\nprint(\"\\nGC per 500 bp:\")\nfor i in range(0,n,500):\n    w=seq[i:i+500]; print(f\"  {i+1:>5}-{i+len(w):<5} GC {100*(w.count('G')+w.count('C'))/len(w):.1f}%\")\n"
+      },
+      "is_error": false,
+      "output_chars": 252,
+      "nt_run": 0
+    }
+  ],
+  "turns": [
+    {
+      "input_tokens": 565,
+      "output_tokens": 95,
+      "cached_tokens": 512,
+      "tool_calls": 2,
+      "seconds": 1.6
+    },
+    {
+      "input_tokens": 1658,
+      "output_tokens": 91,
+      "cached_tokens": 512,
+      "tool_calls": 1,
+      "seconds": 1.5
+    },
+    {
+      "input_tokens": 2288,
+      "output_tokens": 254,
+      "cached_tokens": 1536,
+      "tool_calls": 1,
+      "seconds": 2.5
+    },
+    {
+      "input_tokens": 2615,
+      "output_tokens": 423,
+      "cached_tokens": 2176,
+      "tool_calls": 1,
+      "seconds": 3.5
+    },
+    {
+      "input_tokens": 3167,
+      "output_tokens": 898,
+      "cached_tokens": 2560,
+      "tool_calls": 1,
+      "seconds": 6.9
+    },
+    {
+      "input_tokens": 4516,
+      "output_tokens": 1187,
+      "cached_tokens": 3072,
+      "tool_calls": 1,
+      "seconds": 8.6
+    },
+    {
+      "input_tokens": 5786,
+      "output_tokens": 891,
+      "cached_tokens": 4480,
+      "tool_calls": 1,
+      "seconds": 5.9
+    },
+    {
+      "input_tokens": 6814,
+      "output_tokens": 1321,
+      "cached_tokens": 5760,
+      "tool_calls": 1,
+      "seconds": 9.2
+    },
+    {
+      "input_tokens": 8180,
+      "output_tokens": 1286,
+      "cached_tokens": 6784,
+      "tool_calls": 1,
+      "seconds": 9.3
+    },
+    {
+      "input_tokens": 9662,
+      "output_tokens": 4397,
+      "cached_tokens": 8064,
+      "tool_calls": 1,
+      "seconds": 28.7
+    },
+    {
+      "input_tokens": 14635,
+      "output_tokens": 1527,
+      "cached_tokens": 9600,
+      "tool_calls": 1,
+      "seconds": 10.0
+    },
+    {
+      "input_tokens": 16370,
+      "output_tokens": 2195,
+      "cached_tokens": 14592,
+      "tool_calls": 1,
+      "seconds": 15.0
+    },
+    {
+      "input_tokens": 19014,
+      "output_tokens": 1815,
+      "cached_tokens": 16256,
+      "tool_calls": 1,
+      "seconds": 13.2
+    },
+    {
+      "input_tokens": 20926,
+      "output_tokens": 2053,
+      "cached_tokens": 18944,
+      "tool_calls": 1,
+      "seconds": 13.4
+    },
+    {
+      "input_tokens": 23127,
+      "output_tokens": 3221,
+      "cached_tokens": 20864,
+      "tool_calls": 1,
+      "seconds": 21.3
+    },
+    {
+      "input_tokens": 26408,
+      "output_tokens": 2331,
+      "cached_tokens": 23040,
+      "tool_calls": 1,
+      "seconds": 15.7
+    },
+    {
+      "input_tokens": 28812,
+      "output_tokens": 387,
+      "cached_tokens": 26368,
+      "tool_calls": 1,
+      "seconds": 3.3
+    },
+    {
+      "input_tokens": 29264,
+      "output_tokens": 1198,
+      "cached_tokens": 28800,
+      "tool_calls": 1,
+      "seconds": 9.1
+    },
+    {
+      "input_tokens": 30614,
+      "output_tokens": 3034,
+      "cached_tokens": 29184,
+      "tool_calls": 1,
+      "seconds": 19.2
+    },
+    {
+      "input_tokens": 33313,
+      "output_tokens": 1049,
+      "cached_tokens": 0,
+      "tool_calls": 0,
+      "seconds": 8.1
+    }
+  ],
+  "request_ids": [
+    "02179124411430835338acc098a5d522f02313a829aa570ca3503",
+    "0217912441158620958c43c09b2d8895d306984ebab658518d30d",
+    "0217912441173376408ead186a36b7a71ea661df61e4b0c5955c1",
+    "021791244119856c4d1375e87394ab549407fb4b34ce52e614db8",
+    "0217912441233900d9bd7330cfa68208494cd13d7460bbaf0a067",
+    "021791244130854a81c77d48bc6ef475723297888da351632f266",
+    "021791244139005008f00307548aaad250a55687bd5a742547760",
+    "021791244144920a4a9e4d164f3c176730993b0b2e8dd9dd056bd",
+    "02179124415408745ed1e5750293ff098e8b34eca79d24a6f6875",
+    "021791244163409681426abb3fc8758bc9af65311c7ae31d5ad5f",
+    "02179124419212634865fa4f4ec67e4268045741fa8093ff27bd7",
+    "021791244202270346b8af97ccb99950d11a02fa7c731478cb4c4",
+    "0217912442173359f6cd41e8514911883ec9f138006f90ff4b356",
+    "0217912442309467701a42f23cc3d37ac47a8e8735f343aa42997",
+    "0217912442442464883e653edd60bc78b7b920f959874d9484321",
+    "021791244265794681426abb3fc8758bc9af65311c7ae3127dd37",
+    "02179124428154833f1a7c43c44499172059af1828f5943398a05",
+    "0217912442848428eaaf0e0958579087d97c57451756d00c5562e",
+    "0217912442938806408ead186a36b7a71ea661df61e4b0c7a8e02",
+    "0217912443132388eaaf0e0958579087d97c57451756d00909de5"
+  ],
+  "served_models": [
+    "deepseek-v4.1-flash"
+  ],
+  "input_tokens": 287734,
+  "output_tokens": 29653,
+  "cached_tokens": 223104,
+  "status": "end_turn",
+  "forced_report": true,
+  "refusal_category": null,
+  "report": "# Report on `region.fasta` (record `region_009`)\n\n## What the file contains\nA single 3,000 bp DNA sequence with no ambiguity codes and no accompanying annotation.\n\n- **Length:** 3,000 bp\n- **Composition:** A 24.8 %, C 22.7 %, G 23.6 %, T 28.9 % \u2192 **GC = 46.3 %** (slight AT bias)\n- GC varies substantially along the sequence: ~48\u201353 % at the two ends but only 34\u201338 % in the middle (nt ~1001\u20132000).\n\n## Main finding: a large, confidently predicted protein-coding gene\n**Coordinates: nt 271\u20131161 (plus strand)**\n- 891 bp, beginning with ATG at 271\u2013273 (an in-frame stop, TGA, lies immediately upstream) and ending at the TAA stop at 1159\u20131161.\n- Encodes **296 amino acids**.\n- The product is **extremely hydrophobic**: GRAVY = **+0.89**; 61 % of residues are hydrophobic (Leu 42, Ala 33, Ile 27, Phe 23, Val 22) and only ~10 % are charged. Kyte\u2013Doolittle analysis predicts **\u22487\u20139 transmembrane helices** with short connecting loops \u2014 i.e. a **polytopic integral membrane protein** (transporter/sensor-like). No cleavable signal peptide is evident.\n- This ORF is **far too long to be chance**: in 200 Monte-Carlo shuffles of the same base composition, the longest ORF averaged 92 codons and never exceeded 200; none reached 296. It is therefore almost certainly a genuine gene.\n- Supporting evidence for coding function: **GC3 = 62.2 %** vs GC1 51.4 % and GC2 38.9 % \u2014 the strong third-codon-position GC bias typical of translated sequence.\n\n## The region is unusually gene-dense\n- **Six ORFs \u2265 100 codons** are present, together covering **~2,350 bp (78 %)** of the region. In composition-matched shuffled sequences, ORFs of this size cover only ~3 %. The interval **nt 271\u20132966** is almost entirely occupied by long ORFs on one strand or the other.\n- This density, together with transcription on both strands, is characteristic of a **compact viral/phage genome segment** or a very tightly packed polycistronic bacterial region.\n- Other notable ORFs (coordinates on the region):\n  - **+ 1220\u20131636** \u2014 138 aa, also hydrophobic (GRAVY +0.79) \u2192 a second putative membrane protein.\n  - **+ 1650\u20132030** \u2014 126 aa (GRAVY +0.36).\n  - **+ 2526\u20132966** \u2014 146 aa (GRAVY +0.11).\n  - **\u2212 2073\u20132675** \u2014 200 aa (GRAVY +0.03); note this **overlaps** the plus-strand ORFs at ~2257\u20132526 and 2526\u20132966, i.e. a possible case of **overlapping genes on opposite strands**.\n  - **\u2212 2648\u20132950** \u2014 100 aa; plus several shorter ORFs (30\u201390 aa).\n\n## Features that were looked for but NOT found\n- **No repeats:** no exact direct repeat \u2265 20 bp and no inverted repeat \u2265 16 bp anywhere in the 3 kb.\n- Only one homopolymer run: **T\u2087 at nt 1566\u20131572**; all candidate hairpins are trivial (6-bp stems, 4-nt loops).\n- **No convincing regulatory motifs:** no \u03c370-type promoter pair (\u221235 TTGACA with \u221210 TATAAT), no clear ribosome-binding site (AGGAGG) upstream of the main start codon, and no rho-independent terminator (GC hairpin + poly-T). A single TATAAT-like hexamer occurs at 1875\u20131880, but without an accompanying \u221235 element it is not compelling.\n\n## Bottom line\nThe sequence is **not featureless**: it is a gene-dense, coding sequence whose dominant feature is a **296-aa polytopic membrane-protein gene at nt 271\u20131161 (plus strand)**, accompanied by several other long ORFs (notably a second hydrophobic gene at 1220\u20131636 and a possible opposite-strand overlapping gene at 2073\u20132675). The overall architecture suggests a compact genome/operon rather than a single isolated gene.\n\n**Caveat:** without database comparison (BLAST/HMMER) the *function* of these products cannot be assigned; the above is inferred from sequence statistics, composition, and hydrophobicity only.",
+  "nt_run_from_tools": 1960,
+  "seen_intervals": [
+    [
+      1,
+      3000
+    ]
+  ],
+  "tool_errors": 0,
+  "seconds": 207.0,
+  "provider": "opencode-go",
+  "rep": 2,
+  "claims": {
+    "features": [
+      {
+        "type": "other",
+        "start": 1001,
+        "end": 2000,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "GC-poor middle region"
+      },
+      {
+        "type": "gene",
+        "start": 271,
+        "end": 1161,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "296-aa polytopic membrane protein, plus strand"
+      },
+      {
+        "type": "gene",
+        "start": 1220,
+        "end": 1636,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "138-aa hydrophobic membrane protein, plus strand"
+      },
+      {
+        "type": "gene",
+        "start": 1650,
+        "end": 2030,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "126-aa ORF, plus strand"
+      },
+      {
+        "type": "gene",
+        "start": 2073,
+        "end": 2675,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "200-aa ORF, minus strand, overlapping opposite-strand ORFs"
+      },
+      {
+        "type": "gene",
+        "start": 2526,
+        "end": 2966,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "146-aa ORF, plus strand"
+      },
+      {
+        "type": "gene",
+        "start": 2648,
+        "end": 2950,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "100-aa ORF, minus strand"
+      }
+    ],
+    "named_identity": []
+  },
+  "judge_model": "kimi-k2.7-code"
+}

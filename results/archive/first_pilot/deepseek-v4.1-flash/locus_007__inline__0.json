@@ -1,0 +1,182 @@
+{
+  "locus": "locus_007",
+  "condition": "inline",
+  "model": "deepseek-v4.1-flash",
+  "effort": null,
+  "read_default": 2000,
+  "tool_calls": [
+    {
+      "name": "list_files",
+      "input": {},
+      "is_error": false,
+      "output_chars": 17,
+      "nt_run": 0
+    },
+    {
+      "name": "read_file",
+      "input": {
+        "path": "region.fasta",
+        "offset": 0,
+        "length": 300
+      },
+      "is_error": false,
+      "output_chars": 327,
+      "nt_run": 285
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nimport re\n\ntext = open('region.fasta').read()\nlines = text.split('\\n')\nheader = lines[0]\nseq = ''.join(l.strip() for l in lines[1:] if not l.startswith('>'))\nseq = seq.upper()\nprint(\"Header:\", header)\nprint(\"Length:\", len(seq))\nfrom collections import Counter\nc = Counter(seq)\nprint(c)\ngc = (c['G']+c['C'])/len(seq)*100\nprint(\"GC %%: %.2f\" % gc)\n\n# base composition per 500 bp window\nprint(\"\\nGC content in 500bp windows:\")\nfor i in range(0, len(seq), 500):\n    w = seq[i:i+500]\n    g = (w.count('G')+w.count('C'))/len(w)*100\n    print(f\"  {i+1}-{i+len(w)}: GC={g:.1f}%\")\n\n# find longest homopolymer runs\nprint(\"\\nLongest homopolymer runs:\")\nruns = []\nfor m in re.finditer(r'(A{4,}|T{4,}|G{4,}|C{4,})', seq):\n    runs.append((m.start()+1, m.end(), m.group()))\nfor r in sorted(runs, key=lambda x: -len(x[2]))[:12]:\n    print(f\"  pos {r[0]}-{r[1]} len {len(r[2])}: {r[2]}\")\n\n# ORFs on both strands, min 100 aa\ncomp = str.maketrans('ACGT','TGCA')\nrc = seq.translate(comp)[::-1]\ndef orfs(s, strand):\n    res=[]\n    for frame in range(3):\n        i=frame\n        while i < len(s)-2:\n            if s[i:i+3]=='ATG':\n                j=i\n                while j < len(s)-2:\n                    cod=s[j:j+3]\n                    if cod in ('TAA','TAG','TGA'):\n                        length=(j+3-i)\n                        if length>=300:\n                            aa=length//3-1\n                            res.append((i+1, j+3, aa, strand, frame+1))\n                        break\n                    j+=3\n                i=j+3\n            else:\n                i+=3\n    return res\n\nprint(\"\\nLong ORFs (>=100 aa):\")\nfor o in sorted(orfs(seq,'+')+orfs(rc,'-'), key=lambda x:-x[2]):\n    print(f\"  {o[3]} strand frame {o[4]}: {o[0]}-{o[1]} ({o[2]} aa)\")\n"
+      },
+      "is_error": false,
+      "output_chars": 753,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nimport re\ntext = open('region.fasta').read()\nseq = ''.join(l.strip() for l in text.split('\\n')[1:] if not l.startswith('>')).upper()\n\n# ---- Detect tandem repeats: for each period p, find maximal runs of near-identical copies\nprint(\"=== Tandem repeat detection (exact period, >=3 copies, period 5-100) ===\")\nfound=[]\nfor p in range(5,101):\n    i=0\n    while i + 3*p <= len(seq):\n        # count identical consecutive copies of seq[i:i+p]\n        unit = seq[i:i+p]\n        k=1\n        while seq[i+k*p:i+(k+1)*p] == unit:\n            k+=1\n        if k>=3:\n            found.append((i+1, i+k*p, p, k, unit))\n            i += k*p\n        else:\n            i+=1\n# dedupe overlapping\nfound.sort()\nfor f in found:\n    print(f\"  {f[0]}-{f[1]}  period={f[2]} copies={f[3]}  unit={f[4]}\")\n\nprint()\nprint(\"=== Approximate tandem repeat region (self-alignment scan) ===\")\n# Dot-plot-like: find offsets with many matching diag segments\ntarget = seq[2200:2450]\nprint(\"Region 2201-2450:\")\nprint(target)\nprint()\n# find each 20-mer in that region occurring multiple times\nfor i in range(2200,2450,10):\n    kmer=seq[i:i+20]\n    hits=[m.start()+1 for m in re.finditer('(?='+kmer+')', seq)]\n    if len(hits)>1:\n        print(f\"  unit at {i+1} (x{len(hits)}): {kmer} -> {hits}\")\n"
+      },
+      "is_error": false,
+      "output_chars": 407,
+      "nt_run": 250
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nimport re\ntext = open('region.fasta').read()\nseq = ''.join(l.strip() for l in text.split('\\n')[1:] if not l.startswith('>')).upper()\n\nprobe=\"GAGGGCCATTGAGCGTACATCATCTCATGTCCT\"\nprint(\"probe found at:\", [m.start()+1 for m in re.finditer('(?='+probe+')', seq)])\n\n# print the repeat region\nstart=seq.find(\"TCCAAGGACAATGCGGCGCGGAGC\")\nprint(\"start of region:\", start+1)\nregion=seq[start:start+400]\nprint(region)\nprint()\n# split into 60-char lines with coordinates\nfor i in range(start, min(start+400,len(seq)), 60):\n    print(f\"{i+1:5d} {seq[i:i+60]}\")\n"
+      },
+      "is_error": false,
+      "output_chars": 916,
+      "nt_run": 400
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\ntext = open('region.fasta').read()\nseq = ''.join(l.strip() for l in text.split('\\n')[1:] if not l.startswith('>')).upper()\n\n# Autocorrelation of match fraction across a candidate window to find the repeat period\ndef match_frac(s, k):\n    n=0; m=0\n    for i in range(len(s)-k):\n        m+=1\n        if s[i]==s[i+k]: n+=1\n    return n/m\n\nw = seq[1820:2160]\nprint(\"window\", 1821, 2160, \"len\", len(w))\nprint(\"offset : match fraction\")\nfor k in range(5,90):\n    mf=match_frac(w,k)\n    bar='#'*int(mf*60)\n    print(f\"{k:3d} {mf:.3f} {bar}\")\n"
+      },
+      "is_error": false,
+      "output_chars": 2203,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\ntext = open('region.fasta').read()\nseq = ''.join(l.strip() for l in text.split('\\n')[1:] if not l.startswith('>')).upper()\nL=len(seq)  # 3000\n\n# Period-33 match fraction between seq[i] and seq[i+33] as a function of i -> find repeat boundaries\nprint(\"period-33 local match (window 33) along sequence:\")\ni=1700\nwhile i < 2260-66:\n    n=0\n    for j in range(33):\n        if seq[i+j]==seq[i+33+j]: n+=1\n    if i%3==0:\n        print(f\"  i={i+1:5d} matches={n}/33\")\n    i+=33\n\n# Establish phasing: choose frame such that units align. Take from 1869 probe\n# print 33-mers starting 1869\nprint(\"\\n33-mers phased from position 1869:\")\nstart=1869\nunits=[]\nfor i in range(start-1, 2130, 33):\n    u=seq[i:i+33]\n    units.append((i+1,u))\n    print(f\"  {i+1:5d}  {u}\")\n\n# consensus\nfrom collections import Counter\ncons=[]\nfor j in range(33):\n    cc=Counter(u[j] for _,u in units if len(u)==33)\n    cons.append(cc.most_common(1)[0][0])\ncons=''.join(cons)\nprint(\"\\nConsensus 33-mer:\", cons)\nfor pos,u in units:\n    mm=[j for j in range(33) if u[j]!=cons[j]]\n    print(f\"  {pos:5d} mismatches at {mmm if False else mm} ({len(mm)})\")\n"
+      },
+      "is_error": false,
+      "output_chars": 741,
+      "nt_run": 33
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\ntext = open('region.fasta').read()\nseq = ''.join(l.strip() for l in text.split('\\n')[1:] if not l.startswith('>')).upper()\n\nanchor=1869  # 1-based start of a good unit\ncons=\"GAGGGCCATTGAGCGTACATCATCTCATGTCCT\"\nprint(\"Extended phasing around the array (period 33):\\n\")\nfor k in range(-3, 10):\n    s = anchor-1 + k*33\n    if s<0 or s+33>len(seq): continue\n    u=seq[s:s+33]\n    mm=sum(1 for j in range(33) if u[j]!=cons[j])\n    tag = \"  <-- unit\" if mm<=3 else \"  (diverged)\"\n    print(f\"unit {k:+d}  {s+1:5d}-{s+33:5d}  {u}  mism={mm}{tag}\")\n\nprint(\"\\nFull array text 1800-2200:\")\nfor i in range(1800, 2200, 60):\n    print(f\"{i+1:5d} {seq[i:i+60]}\")\n"
+      },
+      "is_error": false,
+      "output_chars": 1522,
+      "nt_run": 60
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\ntext = open('region.fasta').read()\nseq = ''.join(l.strip() for l in text.split('\\n')[1:] if not l.startswith('>')).upper()\nL=len(seq)\n\n# --- Whole-genome tandem repeat scan: for each period p, sliding match fraction (window = 3p)\nprint(\"=== Approximate tandem repeats, whole sequence (period p, match frac>=0.7 over >=3 copies) ===\")\ndef frac(a,b):\n    return sum(1 for x,y in zip(a,b) if x==y)/len(a)\nhits=[]\nfor p in range(6,201):\n    W=3*p\n    i=0\n    while i+W<=L:\n        f=frac(seq[i:i+W-p], seq[i+p:i+W])\n        if f>=0.75:\n            # extend\n            j=i+W\n            while j+p<=L and frac(seq[j-p:j], seq[j:j+p])>=0.7:\n                j+=p\n            hits.append((i+1,j,p,round(f,2)))\n            i=j\n        else:\n            i+=1\n# merge/print non-redundant (drop those contained in a larger hit)\nhits.sort(key=lambda h:-(h[1]-h[0]))\nkept=[]\nfor h in hits:\n    if not any(k[0]<=h[0] and h[1]<=k[1] for k in kept):\n        kept.append(h)\nkept.sort()\nfor h in kept:\n    print(f\"  {h[0]}-{h[1]}  len={h[1]-h[0]+1}  period~{h[2]}  frac={h[3]}\")\n\n# --- Inverted repeats (palindromes) length >= 14 ---\nprint(\"\\n=== Inverted repeats (stem length >=14, loop<=30) ===\")\ncomp=str.maketrans('ACGT','TGCA')\ndef rc(s): return s.translate(comp)[::-1]\nir=[]\nfor i in range(L):\n    for stem in range(30,13,-1):\n        if i+stem>L: continue\n        a=seq[i:i+stem]\n        # search for rc(a) downstream within 40\n        pat=rc(a)\n        idx=seq.find(pat, i+stem, i+stem+40)\n        if idx!=-1:\n            ir.append((i+1, idx+stem, stem))\n            break\n# dedupe\nseen=set()\nfor a,b,st in ir:\n    key=(a,b)\n    if key in seen: continue\n    seen.add(key)\n    print(f\"  stem {a}-{a+st-1} .. {b-st+1}-{b}  ({st} bp arms, loop {b-st-(a+st-1)-1})\")\n"
+      },
+      "is_error": false,
+      "output_chars": 277,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\ntext = open('region.fasta').read()\nseq = ''.join(l.strip() for l in text.split('\\n')[1:] if not l.startswith('>')).upper()\ncomp=str.maketrans('ACGT','TGCA')\nrc=seq.translate(comp)[::-1]\ncodon = {}\nbases='TCAG'\naas='FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG'\ni=0\nfor a in bases:\n    for b in bases:\n        for c in bases:\n            codon[a+b+c]=aas[i]; i+=1\ndef translate(s, frame=0):\n    return ''.join(codon[s[j:j+3]] for j in range(frame, len(s)-2, 3))\n\n# Check the ORF overlapping the repeat (plus strand, ~1831-2238)\nprint(\"Plus-strand ORF region 1831-2238:\")\nprint(\"  start codon check seq[1830:1833] =\", seq[1830:1833])\naa = translate(seq[1830:2238])\nprint(\"  protein len\", len(aa)-1, \"aa\")\nprint(\"  protein:\", aa)\n\n# The 171 aa minus-strand ORF 879-1394\nprint(\"\\nMinus-strand ORF (879-1394 on + coords):\")\nsub=seq[878:1394]\nsubrc=sub.translate(comp)[::-1]\naa2=translate(subrc)\nprint(\"  protein len\", len(aa2)-1)\nprint(\"  protein:\", aa2)\n\n# --- Where is the tandem repeat relative to ORF frame? ---\nprint(\"\\nRepeat starts at 1869; ORF starts 1831 => offset\", 1869-1831, \"mod3 =\", (1869-1831)%3)\nprint(\"Translation of one repeat unit in ORF frame (frame offset %d):\" % ((1869-1831)%3))\noff=(1869-1831)%3\nprint(\" \", translate(seq[1830+off:1830+off+99],0))\n"
+      },
+      "is_error": false,
+      "output_chars": 648,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\ntext = open('region.fasta').read()\nseq = ''.join(l.strip() for l in text.split('\\n')[1:] if not l.startswith('>')).upper()\ncomp=str.maketrans('ACGT','TGCA')\n\ncons=\"GAGGGCCATTGAGCGTACATCATCTCATGTCCT\"\nprint(\"consensus length:\", len(cons))\nprint(\"consensus GC%%: %.1f\" % ((cons.count('G')+cons.count('C'))/len(cons)*100))\n\n# per-copy table\nprint(\"\\nTandem copies (33-bp unit):\")\nfor k in range(-1,9):\n    s=1869-1+k*33\n    u=seq[s:s+33]\n    mm=sum(1 for j in range(33) if u[j]!=cons[j])\n    print(f\"  copy {k+1:2d}  {s+1:5d}-{s+33:5d}  mismatches={mm}  {u}\")\n\n# check ORF start context (upstream in-frame stop?)\nprint(\"\\nUpstream of ORF start (1831):\", seq[1795:1831])\nprint(\"First 6 codons:\", [seq[1830+3*i:1833+3*i] for i in range(6)])\n\n# Repeat unit count actually inside ORF\nprint(\"\\nORF 1831-2238 (135 aa), repeat-encoded peptide LRAIERTSSHV occurrences:\")\nprot=\"MRRGAMRTSCHVLRAIERTSSHVLRAIERTSSHVLRAIDRTSSHLLRAIERTSSHILRAIERTSCHVLRAIERRSSHVLRAIVRTSSHVLRAIERTSSHVMRAIEVSNKSSSIFPTIPSGINVVQCRTVSSGTVR\"\nprint(\"  count 'LRAIERTSSHV'-like:\", prot.count(\"LRAIE\"))\nfor i in range(0,len(prot),50):\n    print(\"   \",prot[i:i+50])\n"
+      },
+      "is_error": false,
+      "output_chars": 1172,
+      "nt_run": 36
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\ntext=open('region.fasta').read()\nseq=''.join(l.strip() for l in text.split('\\n')[1:] if not l.startswith('>')).upper()\ncomp=str.maketrans('ACGT','TGCA')\nbases='TCAG'; aas='FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG'\ncodon={}; i=0\nfor a in bases:\n for b in bases:\n  for c in bases:\n   codon[a+b+c]=aas[i]; i+=1\ndef tr(s): return ''.join(codon[s[j:j+3]] for j in range(0,len(s)-2,3))\n\n# minus-strand ORF 879-1394 (+coords) -> revcomp\nsub=seq[878:1394].translate(comp)[::-1]\nprint(\"Minus-strand ORF 879-1394 (+ coords): revcomp starts\", sub[:6], \"...ends\", sub[-6:])\nprot=tr(sub)\nprint(\"protein:\",prot)\nprint(\"length:\",len(prot)-1,\"aa; internal stops:\",prot[:-1].count('*'))\n\n# poly-A / low complexity near end\nprint(\"\\nEnd of sequence 2930-3000:\", seq[2929:3000])\n"
+      },
+      "is_error": false,
+      "output_chars": 391,
+      "nt_run": 71
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\ntext=open('region.fasta').read()\nseq=''.join(l.strip() for l in text.split('\\n')[1:] if not l.startswith('>')).upper()\nL=len(seq)\ncomp=str.maketrans('ACGT','TGCA')\nrc=seq.translate(comp)[::-1]\nbases='TCAG'; aas='FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG'\ncodon={}; i=0\nfor a in bases:\n for b in bases:\n  for c in bases:\n   codon[a+b+c]=aas[i]; i+=1\ndef tr(s): return ''.join(codon[s[j:j+3]] for j in range(0,len(s)-2,3))\n\ndef find_orfs(s, strand):\n    res=[]\n    for f in range(3):\n        i=f\n        while i <= len(s)-3:\n            if s[i:i+3]=='ATG':\n                j=i\n                while j<=len(s)-3 and s[j:j+3] not in ('TAA','TAG','TGA'):\n                    j+=3\n                if j<=len(s)-3:\n                    ncod=(j+3-i)//3\n                    if ncod>=100:\n                        prot=tr(s[i:j+3])\n                        # map to + coords\n                        if strand=='+':\n                            a,b=i+1,j+3\n                        else:\n                            a,b=L-(j+3)+1, L-i\n                        res.append((a,b,ncod-1,strand,prot))\n                i=j+3\n            else:\n                i+=3\n    return res\n\norfs=find_orfs(seq,'+')+find_orfs(rc,'-')\norfs.sort(key=lambda x:-x[2])\nprint(\"Long ORFs (>=100 aa), + strand coordinates:\")\nfor a,b,aa,st,prot in orfs:\n    print(f\"  {st} {a}-{b}  {aa} aa\")\nprint()\n# Show the repeat-containing ORF protein again\nfor a,b,aa,st,prot in orfs:\n    if st=='+' and a<1900<b:\n        print(\"ORF\",a,b,\"protein:\")\n        print(\" \",prot)\n"
+      },
+      "is_error": false,
+      "output_chars": 272,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\ntext=open('region.fasta').read()\nseq=''.join(l.strip() for l in text.split('\\n')[1:] if not l.startswith('>')).upper()\ncomp=str.maketrans('ACGT','TGCA')\nbases='TCAG'; aas='FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG'\ncodon={}; i=0\nfor a in bases:\n for b in bases:\n  for c in bases:\n   codon[a+b+c]=aas[i]; i+=1\ndef tr(s): return ''.join(codon[s[j:j+3]] for j in range(0,len(s)-2,3))\nsub=seq[1606:2122].translate(comp)[::-1]\nprot=tr(sub)\nprint(\"Minus-strand ORF 1607-2122 protein (%d aa):\"%(len(prot)-1))\nprint(prot)\n"
+      },
+      "is_error": false,
+      "output_chars": 218,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nimport re\ntext=open('region.fasta').read()\nseq=''.join(l.strip() for l in text.split('\\n')[1:] if not l.startswith('>')).upper()\nprint(\"CCAGGT at:\", [m.start()+1 for m in re.finditer('(?=CCAGGT)', seq)])\nprint(\"First 60 bp:\", seq[:60])\n"
+      },
+      "is_error": false,
+      "output_chars": 105,
+      "nt_run": 60
+    }
+  ],
+  "request_ids": [
+    "0217912386347482504cb05148e9a08cc7612c3f2b24e52d9f77a",
+    "021791238637699681426abb3fc8758bc9af65311c7ae31db4134",
+    "021791238642242008f00307548aaad250a55687bd5a742df302e",
+    "021791238646411b965c2d2b2bb89ed3e2dfeb918ea3f76ac2e0d",
+    "021791238651114d45041e92366fce25871fcc31e231b4d77f1d0",
+    "021791238657272c891133c7aa592195d19c3080f8a135dc69ede",
+    "chatcmpl-RKxVFzzi2aI6KgO9OQh0dpMV",
+    "chatcmpl-RBjYmiIekCkV0BV4OvW6HRU6",
+    "chatcmpl-RVmuAxZgJQpHRNWA81iIBZWs",
+    "chatcmpl-RXUaOEjFfDuj9SC5DJIUZgCs",
+    "chatcmpl-RlZgHV6QQdKGtwPq6zjSi9gX",
+    "chatcmpl-RIXLKH76bNsu5SoonGVLnS42",
+    "chatcmpl-RRz1B8b8XYSF4K7JeU9f4Cvk",
+    "chatcmpl-RpHJErepRs8CsaSF3tfWlhGl",
+    "chatcmpl-RCwL5e8PQMHhVTuFnX71xywa"
+  ],
+  "input_tokens": 151194,
+  "output_tokens": 12696,
+  "status": "end_turn",
+  "forced_report": false,
+  "refusal_category": null,
+  "report": "# Report on `region.fasta` (`locus_007`)\n\n## Basic composition\n- **Length:** 3,000 bp.\n- **GC content:** 55.0% overall (G 864, C 787, A 682, T 667). Fairly uniform across the region (52.8\u201358.2% in 500\u2011bp windows), i.e. no GC\u2011skewed islands.\n- No significant inverted repeats / palindromes (nothing with arms \u226514 bp) and no other long-range repeats were detected.\n\n## Notable feature 1 \u2014 an imperfect 33\u2011bp tandem repeat array (the main finding)\nA self-comparison scan of the sequence shows a sharp periodicity at **33 bp** (82% position identity across the array; the 66\u2011bp and 99\u2011bp signals are just multiples of it).\n\n- **Consensus unit (33 bp):** `GAGGGCCATTGAGCGTACATCATCTCATGTCCT` (51.5% GC)\n- **High-identity copies:** **8 tandem copies spanning 1869\u20132132** (264 bp), each 0\u20132 substitutions from the consensus:\n\n| Copy | Coordinates (+, 1\u2011based) | Mismatches |\n|------|--------------------------|-----------|\n| 1 | 1869\u20131901 | 0 |\n| 2 | 1902\u20131934 | 1 |\n| 3 | 1935\u20131967 | 2 |\n| 4 | 1968\u20132000 | 1 |\n| 5 | 2001\u20132033 | 1 |\n| 6 | 2034\u20132066 | 2 |\n| 7 | 2067\u20132099 | 2 |\n| 8 | 2100\u20132132 | 2 |\n\n- **Degenerate flanking copies:** a 9th, heavily diverged copy sits immediately upstream at **1836\u20131868** (10 mismatches, shares only the 3\u2032 half of the unit), and a further diverged copy at **2133\u20132165** (19 mismatches). Including these, the low\u2011complexity repeat tract spans roughly **1836\u20132165 (~330 bp)**.\n\n## Notable feature 2 \u2014 the repeat lies inside two overlapping ORFs\nBoth long open reading frames in the region overlap the array, so the 33\u2011bp repeat is translated as a low\u2011complexity **protein** repeat in both directions:\n\n- **+ strand ORF 1831\u20132238 (135 aa)** \u2014 begins with ATG at 1831, ends at a TGA stop at 2236\u20132238. Its protein contains an ~11\u2011aa tandem repeat corresponding to the DNA unit:\n  `MRRGAMRTSCHV` **`LRAIERTSSHV LRAIERTSSHV LRAIDRTSSHL LRAIERTSSHI LRAIERTSCHV LRAIERRSSHV LRAIVRTSSHV LRAIERTSSHV`** `MRAIEVSNKSSSIFPTIPSGINVVQCRTVSSGTVR`\n- **\u2212 strand ORF 1607\u20132122 (171 aa)** \u2014 the same array read on the opposite strand yields a different low-complexity peptide repeat:\n  `MMYALWPSGHEMMYAQWPAGHEMIYAQLPSGHDMMYAQWPSGYEMMYAQWPSGDEMMYGQWPSGHEMMYAQWPLGHEMMYAQWPSGHDMMYAL\u2026`\n- A third, unrelated + strand ORF (731\u20131066, 111 aa) exists outside the repeat and looks unremarkable.\n\n## Other minor observations\n- **Homopolymer runs:** A\u2088 at **2955\u20132962** (near the 3\u2032 end), plus G\u2086 at 25\u201330, C\u2086 at 2494\u20132499, and A\u2086 at 2742\u20132747 \u2014 all short and unremarkable.\n- **Short direct repeat:** `CCAGGT` occurs at positions 1, 31, 1774 and 2588; the 1/31 pair is a small local duplication at the very 5\u2032 end. Nothing functionally suggestive.\n\n## Bottom line\nThe sequence is not random: its standout feature is an **imperfect 33\u2011bp tandem repeat** (8 near\u2011identical copies at **1869\u20132132**, with degenerate copies extending the tract to ~**1836\u20132165**) whose consensus is `GAGGGCCATTGAGCGTACATCATCTCATGTCCT`. This array is embedded in, and translated by, **two overlapping long ORFs (1831\u20132238 on the + strand; 1607\u20132122 on the \u2212 strand)**, producing low-complexity tandem peptide repeats on both strands. That internal repetitive, low-complexity coding structure is the most notable thing about the locus; no other strong structural signals (inverted repeats, other repeat families, or obviously conserved motifs) were found.",
+  "nt_run_from_tools": 400,
+  "provider": "opencode-go",
+  "rep": 0,
+  "claims": {
+    "claims_repeat_array": true,
+    "unit_length": 33,
+    "copy_number": 8,
+    "start": 1869,
+    "end": 2132,
+    "supporting_quote": "High-identity copies: 8 tandem copies spanning 1869\u20132132 (264 bp), each 0\u20132 substitutions from the consensus",
+    "other_notable_features": [
+      "repeat array lies inside two overlapping long ORFs (+ strand 1831\u20132238 and \u2212 strand 1607\u20132122) and is translated as low-complexity tandem peptide repeats on both strands"
+    ]
+  },
+  "judge_model": "kimi-k2.7-code"
+}

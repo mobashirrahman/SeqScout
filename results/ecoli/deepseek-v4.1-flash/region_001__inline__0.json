@@ -1,0 +1,439 @@
+{
+  "started_at": "2026-10-05T23:11:16+00:00",
+  "prompt_hash": "6548b398e9a9",
+  "code_hash": "7c7d70e28d52",
+  "locus": "region_001",
+  "condition": "inline",
+  "model": "deepseek-v4.1-flash",
+  "effort": null,
+  "read_default": 2000,
+  "max_turns": 20,
+  "tool_calls": [
+    {
+      "turn": 0,
+      "name": "list_files",
+      "input": {},
+      "is_error": false,
+      "output_chars": 17,
+      "nt_run": 0
+    },
+    {
+      "turn": 0,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\"\nwith open(\"region.fasta\") as f:\n    lines = f.read().splitlines()\nheader = lines[0]\nseq = \"\".join(lines[1:])\nprint(\"Header:\", header)\nprint(\"Length:\", len(seq))\nfrom collections import Counter\nprint(\"Composition:\", Counter(seq))\n"
+      },
+      "is_error": false,
+      "output_chars": 96,
+      "nt_run": 0
+    },
+    {
+      "turn": 1,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\"\nwith open(\"region.fasta\") as f:\n    lines = f.read().splitlines()\nseq = \"\".join(lines[1:]).upper()\nn = len(seq)\n\ndef revcomp(s):\n    comp = {'A':'T','T':'A','G':'C','C':'G','N':'N'}\n    return \"\".join(comp[c] for c in reversed(s))\n\nprint(\"=== ORF scan (all 6 frames, min 100 aa) ===\")\nfor strand, s in [('+', seq), ('-', revcomp(seq))]:\n    for frame in range(3):\n        # find ORFs from ATG to stop\n        i = frame\n        orfs = []\n        # scan for start codons\n        j = frame\n        while j < len(s)-2:\n            if s[j:j+3] == 'ATG':\n                k = j\n                while k < len(s)-2:\n                    if s[k:k+3] in ('TAA','TAG','TGA'):\n                        break\n                    k += 3\n                aa = (k-j)//3\n                if aa >= 100:\n                    orfs.append((j, k, aa))\n                j = k+3\n            else:\n                j += 3\n        for (a,b,aa) in orfs:\n            if strand == '+':\n                print(f\"strand {strand} frame {frame}: {a+1}-{b+3} len {aa} aa ({b+3-a} nt)\")\n            else:\n                # convert coords back\n                print(f\"strand {strand} frame {frame}: rc {a+1}-{b+3} len {aa} aa -> genome {n-(b+3)+1}-{n-a}\")\n"
+      },
+      "is_error": false,
+      "output_chars": 320,
+      "nt_run": 0
+    },
+    {
+      "turn": 2,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\"\nwith open(\"region.fasta\") as f:\n    lines = f.read().splitlines()\nseq = \"\".join(lines[1:]).upper()\nn = len(seq)\n\ndef revcomp(s):\n    comp = {'A':'T','T':'A','G':'C','C':'G','N':'N'}\n    return \"\".join(comp[c] for c in reversed(s))\n\nrc = revcomp(seq)\n\nprint(\"=== Longest ORF in each frame (all 6), showing stop-to-stop ===\")\ndef longest_orfs(s):\n    res = {}\n    for frame in range(3):\n        i = frame\n        segs = []\n        cur_start = i\n        k = i\n        while k < len(s)-2:\n            if s[k:k+3] in ('TAA','TAG','TGA'):\n                segs.append((cur_start, k))\n                cur_start = k+3\n                k += 3\n            else:\n                k += 3\n        segs.append((cur_start, len(s)))\n        best = max(segs, key=lambda x: x[1]-x[0])\n        res[frame] = best\n    return res\n\nprint(\"Plus strand (start-end of longest stop-free segment):\")\nfor f,b in longest_orfs(seq).items():\n    print(f\"  frame {f}: {b[0]+1}-{b[1]} length {b[1]-b[0]} nt ({(b[1]-b[0])//3} codons)\")\nprint(\"Minus strand (coords in minus strand):\")\nfor f,b in longest_orfs(rc).items():\n    gstart = n - b[1] + 1\n    gend = n - b[0]\n    print(f\"  frame {f}: rc {b[0]+1}-{b[1]} length {b[1]-b[0]} nt -> genome {gstart}-{gend}\")\n\nprint()\nprint(\"=== Search for direct repeats (>= 20 bp) ===\")\nseen = {}\nfor L in [30, 25, 20, 15, 12, 10]:\n    found = []\n    d = {}\n    for i in range(0, n-L+1):\n        k = seq[i:i+L]\n        if k in d:\n            found.append((k, d[k], i))\n        else:\n            d[k] = i\n    print(f\"len {L}: {len(found)} repeat pairs\")\n    for k,a,b in found[:10]:\n        print(f\"   pos {a+1} & {b+1}: {k}\")\n    if found:\n        break\n"
+      },
+      "is_error": false,
+      "output_chars": 660,
+      "nt_run": 0
+    },
+    {
+      "turn": 3,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\"\nwith open(\"region.fasta\") as f:\n    lines = f.read().splitlines()\nseq = \"\".join(lines[1:]).upper()\nn = len(seq)\n\ndef revcomp(s):\n    comp = {'A':'T','T':'A','G':'C','C':'G','N':'N'}\n    return \"\".join(comp[c] for c in reversed(s))\nrc = revcomp(seq)\n\ncodon_table = {\n 'TTT':'F','TTC':'F','TTA':'L','TTG':'L','CTT':'L','CTC':'L','CTA':'L','CTG':'L',\n 'ATT':'I','ATC':'I','ATA':'I','ATG':'M','GTT':'V','GTC':'V','GTA':'V','GTG':'V',\n 'TCT':'S','TCC':'S','TCA':'S','TCG':'S','CCT':'P','CCC':'P','CCA':'P','CCG':'P',\n 'ACT':'T','ACC':'T','ACA':'T','ACG':'T','GCT':'A','GCC':'A','GCA':'A','GCG':'A',\n 'TAT':'Y','TAC':'Y','TAA':'*','TAG':'*','CAT':'H','CAC':'H','CAA':'Q','CAG':'Q',\n 'AAT':'N','AAC':'N','AAA':'K','AAG':'K','GAT':'D','GAC':'D','GAA':'E','GAG':'E',\n 'TGT':'C','TGC':'C','TGA':'*','TGG':'W','CGT':'R','CGC':'R','CGA':'R','CGG':'R',\n 'AGT':'S','AGC':'S','AGA':'R','AGG':'R','GGT':'G','GGC':'G','GGA':'G','GGG':'G'}\n\ndef translate(s):\n    return \"\".join(codon_table.get(s[i:i+3],'X') for i in range(0,len(s)-2,3))\n\n# ORF on minus strand: rc positions ~1050 to 2336 (0-based 1049..2336)\norf = rc[1049:2336]\nprint(\"Extracted rc ORF len:\", len(orf), \"first codon:\", orf[:3], \"last codon:\", orf[-3:])\nprot = translate(orf)\nprint(\"Protein length:\", len(prot))\nprint(prot)\nprint()\n# start codon check\nprint(\"First 3 nt of ORF:\", orf[:3], \"->\", codon_table[orf[:3]])\n# Upstream of ORF in rc (i.e., 5' region)\nprint(\"Upstream 30 nt (rc, before ORF):\", rc[1049-30:1049])\n"
+      },
+      "is_error": false,
+      "output_chars": 603,
+      "nt_run": 30
+    },
+    {
+      "turn": 4,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\"\nwith open(\"region.fasta\") as f:\n    lines = f.read().splitlines()\nseq = \"\".join(lines[1:]).upper()\nn = len(seq)\ndef revcomp(s):\n    comp = {'A':'T','T':'A','G':'C','C':'G','N':'N'}\n    return \"\".join(comp[c] for c in reversed(s))\nrc = revcomp(seq)\ncodon_table = {\n 'TTT':'F','TTC':'F','TTA':'L','TTG':'L','CTT':'L','CTC':'L','CTA':'L','CTG':'L',\n 'ATT':'I','ATC':'I','ATA':'I','ATG':'M','GTT':'V','GTC':'V','GTA':'V','GTG':'V',\n 'TCT':'S','TCC':'S','TCA':'S','TCG':'S','CCT':'P','CCC':'P','CCA':'P','CCG':'P',\n 'ACT':'T','ACC':'T','ACA':'T','ACG':'T','GCT':'A','GCC':'A','GCA':'A','GCG':'A',\n 'TAT':'Y','TAC':'Y','TAA':'*','TAG':'*','CAT':'H','CAC':'H','CAA':'Q','CAG':'Q',\n 'AAT':'N','AAC':'N','AAA':'K','AAG':'K','GAT':'D','GAC':'D','GAA':'E','GAG':'E',\n 'TGT':'C','TGC':'C','TGA':'*','TGG':'W','CGT':'R','CGC':'R','CGA':'R','CGG':'R',\n 'AGT':'S','AGC':'S','AGA':'R','AGG':'R','GGT':'G','GGC':'G','GGA':'G','GGG':'G'}\ndef translate(s):\n    return \"\".join(codon_table.get(s[i:i+3],'X') for i in range(0,len(s)-2,3))\nstops=('TAA','TAG','TGA')\n\nprint(\"=== ATG->stop ORFs >= 60 codons ===\")\ndef find_orfs(s, name):\n    res=[]\n    for frame in range(3):\n        j=frame\n        while j<len(s)-2:\n            if s[j:j+3]=='ATG':\n                k=j\n                while k<len(s)-2 and s[k:k+3] not in stops:\n                    k+=3\n                aa=(k-j)//3\n                if aa>=60:\n                    res.append((j,k,aa))\n                j=k+3\n            else:\n                j+=3\n    return res\n\nfor st,s in [('+',seq),('-',rc)]:\n    orfs=find_orfs(s,st)\n    orfs.sort(key=lambda x:-x[2])\n    for j,k,aa in orfs:\n        if st=='+':\n            print(f\"  {st} {j+1}-{k+2}  {aa} aa\")\n        else:\n            gs=n-k-2+1; ge=n-j\n            print(f\"  {st} (genome {gs}-{ge})  {aa} aa  [{s[j:j+3]}...{s[k:k+3]}]\")\n\n# Main ORF details\nprint()\nprint(\"=== Main ORF (reverse strand) ===\")\n# find it precisely\nbest=None\nfor j,k,aa in find_orfs(rc,'-'):\n    if aa>=400:\n        best=(j,k,aa)\nj,k,aa=best\nprot=translate(rc[j:k])\nprint(\"rc coords:\",j+1,\"-\",k+2,\" aa:\",aa)\ngs=n-k-2+1; ge=n-j\nprint(\"genome coords (minus strand 5'->3'): start codon at\", n-j-2, \"-\", n-j, \" stop at\", n-k-2+1,\"-\",n-k)\nprint(\"genome span:\", gs, \"-\", ge)\nprint(\"protein:\", prot)\nfrom collections import Counter\nprint(\"AA composition:\", Counter(prot).most_common())\n# hydrophobic segments\nhydro={'A':1.8,'R':-4.5,'N':-3.5,'D':-3.5,'C':2.5,'Q':-3.5,'E':-3.5,'G':-0.4,'H':-3.2,'I':4.5,'L':3.8,'K':-3.9,'M':1.9,'F':2.8,'P':-1.6,'S':-0.8,'T':-0.7,'W':-0.9,'Y':-1.3,'V':4.2}\nprint(\"\\n=== Hydrophobic windows (>=15 residues, Kyte-Doolittle avg >1.6) ===\")\nw=19\nhits=[]\nfor i in range(0,len(prot)-w+1):\n    avg=sum(hydro.get(c,0) for c in prot[i:i+w])/w\n    if avg>1.6:\n        hits.append((i+1,round(avg,2)))\nprint(hits if hits else \"none\")\n"
+      },
+      "is_error": false,
+      "output_chars": 1205,
+      "nt_run": 0
+    },
+    {
+      "turn": 5,
+      "name": "run_python",
+      "input": {
+        "code": "\nimport random, math\nseq = \"\"\nwith open(\"region.fasta\") as f:\n    lines = f.read().splitlines()\nseq = \"\".join(lines[1:]).upper()\nn = len(seq)\ndef revcomp(s):\n    comp={'A':'T','T':'A','G':'C','C':'G','N':'N'}\n    return \"\".join(comp[c] for c in reversed(s))\nstops=('TAA','TAG','TGA')\n\ndef longest_stopfree(s):\n    best=0\n    for frame in range(3):\n        j=frame; \n        while j<len(s)-2:\n            if s[j:j+3] in stops:\n                j+=3\n            else:\n                k=j\n                while k<len(s)-2 and s[k:k+3] not in stops:\n                    k+=3\n                best=max(best,k-j)\n                j=k+3\n    return best\n\nobs = max(longest_stopfree(seq), longest_stopfree(revcomp(seq)))\nprint(\"Observed longest stop-free segment (nt):\", obs)\n\nrandom.seed(1)\nls=[]\nletters=list(seq)\nfor _ in range(500):\n    random.shuffle(letters)\n    sh=\"\".join(letters)\n    ls.append(max(longest_stopfree(sh), longest_stopfree(revcomp(sh))))\nls.sort()\nprint(\"Shuffled (same composition) longest stop-free: max=%d, 99th=%d, mean=%.0f\"%(max(ls), ls[int(0.99*len(ls))], sum(ls)/len(ls)))\n\n# perfect random\nls2=[]\nfor _ in range(500):\n    sh=\"\".join(random.choice(\"ACGT\") for _ in range(n))\n    ls2.append(max(longest_stopfree(sh), longest_stopfree(revcomp(sh))))\nls2.sort()\nprint(\"Random ACGT longest stop-free: max=%d, 99th=%d, mean=%.0f\"%(max(ls2), ls2[int(0.99*len(ls2))], sum(ls2)/len(ls2)))\n\nprint()\nprint(\"=== Inverted repeats / potential hairpins (stem >= 8, loop <= 50) ===\")\ndef revcomp_str(s):\n    comp={'A':'T','T':'A','G':'C','C':'G','N':'N'}\n    return \"\".join(comp[c] for c in reversed(s))\nhits=[]\nL=8\nfor i in range(n):\n    stem=seq[i:i+L]\n    if len(stem)<L: continue\n    target=revcomp_str(stem)\n    # search downstream within 60 nt\n    for j in range(i+L, min(n-L+1, i+L+60)):\n        if seq[j:j+L]==target:\n            hits.append((i+1, j+L, L, j-(i+L)))\nprint(\"num hairpin candidates:\", len(hits))\nfor h in hits[:15]:\n    print(\"  stem at %d, revcomp at %d, stem %d, loop %d\"%(h[0], h[1], h[2], h[3]))\n\nprint()\nprint(\"=== GC content in 500-nt windows ===\")\nfor i in range(0,n,500):\n    w=seq[i:i+500]\n    gc=sum(w.count(c) for c in \"GC\")/len(w)*100\n    print(f\"  {i+1}-{min(i+500,n)}: GC={gc:.1f}%\")\n\nprint()\nprint(\"=== Longest homopolymer ===\")\nbest=(0,'')\ncur=1\nfor i in range(1,n):\n    if seq[i]==seq[i-1]:\n        cur+=1\n    else:\n        if cur>best[0]: best=(cur,seq[i-1],i-cur+1,i)\n        cur=1\nif cur>best[0]: best=(cur,seq[-1],n-cur+1,n)\nprint(best)\n"
+      },
+      "is_error": false,
+      "output_chars": 724,
+      "nt_run": 0
+    },
+    {
+      "turn": 6,
+      "name": "run_python",
+      "input": {
+        "code": "\nimport math\nfrom collections import Counter\nseq=\"\"\nwith open(\"region.fasta\") as f:\n    lines=f.read().splitlines()\nseq=\"\".join(lines[1:]).upper()\nn=len(seq)\n\n# k-mer z-scores vs random mononucleotide model (order-0), for k=2..6\nprint(\"=== Most over/under-represented k-mers (order-0 expectation) ===\")\nfor k in [2,4,6]:\n    cnt=Counter(seq[i:i+k] for i in range(n-k+1))\n    tot=sum(cnt.values())\n    freqs={c:seq.count(c)/n for c in \"ACGT\"}\n    rows=[]\n    for mer,c in cnt.items():\n        p=1.0\n        for ch in mer: p*=freqs[ch]\n        exp=tot*p\n        var=tot*p*(1-p)\n        z=(c-exp)/math.sqrt(var) if var>0 else 0\n        rows.append((z,mer,c,exp))\n    rows.sort(reverse=True)\n    print(f\"-- k={k}: top overrepresented --\")\n    for z,mer,c,exp in rows[:5]:\n        print(f\"   {mer}: obs={c} exp={exp:.1f} z={z:.1f}\")\n    print(f\"-- k={k}: top underrepresented --\")\n    for z,mer,c,exp in rows[-5:]:\n        print(f\"   {mer}: obs={c} exp={exp:.1f} z={z:.1f}\")\n\nprint()\nprint(\"=== Search for known DNA motifs ===\")\nmotifs={\n 'Chi (GCTGGTGG)':'GCTGGTGG',\n 'DnaA box (TTATCCACA)':'TTATCCACA',\n 'Shine-Dalgarno (AGGAGG)':'AGGAGG',\n 'EcoRI (GAATTC)':'GAATTC',\n 'BamHI (GGATCC)':'GGATCC',\n 'HindIII (AAGCTT)':'AAGCTT',\n 'PstI (CTGCAG)':'CTGCAG',\n 'TATA box (TATAAA)':'TATAAA',\n 'GC box (GGGCGG)':'GGGCGG',\n 'TTGACA -35':'TTGACA',\n 'TATAAT -10':'TATAAT',\n}\nfor name,m in motifs.items():\n    pos=[]\n    start=0\n    while True:\n        i=seq.find(m,start)\n        if i<0: break\n        pos.append(i+1); start=i+1\n    print(f\"  {name}: {len(pos)} hit(s) {pos[:12]}\")\n"
+      },
+      "is_error": false,
+      "output_chars": 1587,
+      "nt_run": 0
+    },
+    {
+      "turn": 7,
+      "name": "run_python",
+      "input": {
+        "code": "\nfrom collections import Counter\nseq=\"\"\nwith open(\"region.fasta\") as f:\n    lines=f.read().splitlines()\nseq=\"\".join(lines[1:]).upper()\nn=len(seq)\ndef revcomp(s):\n    comp={'A':'T','T':'A','G':'C','C':'G','N':'N'}\n    return \"\".join(comp[c] for c in reversed(s))\nrc=revcomp(seq)\nstops=('TAA','TAG','TGA')\n\nprint(\"Stop-codon counts per frame:\")\nfor st,s in [('+',seq),('-',rc)]:\n    for fr in range(3):\n        c=sum(1 for i in range(fr,len(s)-2,3) if s[i:i+3] in stops)\n        print(f\"  {st} frame{fr}: {c} stops in {len(range(fr,len(s)-2,3))} codons\")\n\n# main ORF codon usage / GC3\ndef translate_with_codons(s):\n    return [s[i:i+3] for i in range(0,len(s)-2,3)]\nj,k=1049,2336\norfcod=translate_with_codons(rc[j:k])\ngc3=sum(1 for c in orfcod if c[2] in 'GC')/len(orfcod)\nprint(f\"\\nMain ORF: {len(orfcod)} codons, GC3={gc3*100:.1f}%\")\nallgc=sum(seq.count(c) for c in 'GC')/n\nprint(f\"Overall GC={allgc*100:.1f}%\")\n\n# protein properties\nprot=\"MEILMASSNLIKQLQERGLVAQVTDEEALAERLAQGPIALYCGFDPTADSLHLGHLVPLLCLKRFQQAGHKPVALVGGATGLIGDPSFKAAERKLNTEETVQEWVDKIRKQVAPFLDFDCGENSAIAANNYDWFGNMNVLTFLRDIGKHFSVNQMINKEAVKQRLNREDQGISFTEFSYNLLQGYDFACLNKQYGVVLQIGGSDQWGNITSGIDLTRRLHQNQVFGLTVPLITKADGTKFGKTEGGAVWLDPKKTSPYKFYQFWINTADADVYRFLKFFTFMSIEEINALEEEDKNSGKAPRAQYVLAEQVTRLVHGEEGLQAAKRITECLFSGSLSALSEADFEQLAQDGVPMVEMEKGADLMQALVDSELQPSRGQARKTIASNAITINGEKQSDPEYFFKEEDRLFGRFTLLRRGKKNYCLICWK\"\nprint(\"Protein length:\", len(prot))\nkd={'A':1.8,'R':-4.5,'N':-3.5,'D':-3.5,'C':2.5,'Q':-3.5,'E':-3.5,'G':-0.4,'H':-3.2,'I':4.5,'L':3.8,'K':-3.9,'M':1.9,'F':2.8,'P':-1.6,'S':-0.8,'T':-0.7,'W':-0.9,'Y':-1.3,'V':4.2}\nprint(\"GRAVY:\", round(sum(kd[c] for c in prot)/len(prot),3))\nkw={'D':-3.5,'E':-3.5,'K':-3.9,'R':-4.5,'H':-3.2}\nkk={'D':-3.9,'E':-3.5,'K':-3.9,'R':-4.5,'H':-3.2}\n# crude pI\ndef charge(pH):\n    pos=sum(1/(1+10**(pH-10.8)) for c in prot if c=='K')+sum(1/(1+10**(pH-12.5)) for c in prot if c=='R')+sum(1/(1+10**(pH-6.0)) for c in prot if c=='H')\n    neg=sum(1/(1+10**(6.0-pH)) for c in prot if c in 'DE')+sum(1/(1+10**(2.0-pH)) for c in prot if c in 'C')+sum(1/(1+10**(2.1-pH)) for c in prot if c=='Y')\n    return pos-neg\nlo,hi=2,13\nfor _ in range(60):\n    mid=(lo+hi)/2\n    if charge(mid)>0: lo=mid\n    else: hi=mid\nprint(\"rough pI:\", round((lo+hi)/2,1))\n\n# zinc / CxxC motifs\nimport re\nprint(\"\\nCxxC motifs (positions in protein):\")\nfor m in re.finditer(r'C.{2}C', prot):\n    print(\"  \", m.start()+1, m.group())\nprint(\"\\nHis/Cys clusters:\")\nprint(\"  C count:\", prot.count('C'), \" H count:\", prot.count('H'), \" W:\", prot.count('W'))\nprint(\"  C positions:\", [i+1 for i,c in enumerate(prot) if c=='C'])\nprint(\"  H positions:\", [i+1 for i,c in enumerate(prot) if c=='H'])\n"
+      },
+      "is_error": false,
+      "output_chars": 530,
+      "nt_run": 0
+    },
+    {
+      "turn": 8,
+      "name": "run_python",
+      "input": {
+        "code": "\nimport re\nseq=\"\"\nwith open(\"region.fasta\") as f:\n    lines=f.read().splitlines()\nseq=\"\".join(lines[1:]).upper()\nn=len(seq)\ndef revcomp(s):\n    comp={'A':'T','T':'A','G':'C','C':'G','N':'N'}\n    return \"\".join(comp[c] for c in reversed(s))\nrc=revcomp(seq)\ncodon_table = {a+b+c for a in 'ACGT' for b in 'ACGT' for c in 'ACGT'}\nstops={'TAA','TAG','TGA'}\n\nprint(\"=== Slippery / frameshift-1 heptamer motifs (X XXY YYZ) ===\")\npat=re.compile(r'(?=([ACGT]{3}[ACGT]{3}[ACGT]))')\n# typical: XXX YYY Z with X=any, YYY=homopolymer. Search for A/Trich and Grich runs\nfor m in re.finditer(r'(?=(..[AT]{3}[AT]))', seq):\n    s=m.group(1)\n    # check pattern: positions 2-4 or 3-5 homopolymer\n    pass\n# simpler: search known slippery heptamers\nfor hept in ['TTTTTAA','GGGAAAC','AAAAAAC','TTTAAAC','CTTTTAA']:\n    p=[]\n    st=0\n    while True:\n        i=seq.find(hept,st)\n        if i<0: break\n        p.append(i+1); st=i+1\n    if p: print(\" \",hept,p[:10])\n\nprint()\nprint(\"=== Map of all ORFs >= 90 nt (30 codons), ATG->stop, both strands ===\")\ndef orfs(s):\n    res=[]\n    for fr in range(3):\n        j=fr\n        while j<len(s)-2:\n            if s[j:j+3]=='ATG':\n                k=j\n                while k<len(s)-2 and s[k:k+3] not in stops:\n                    k+=3\n                if k-j>=90:\n                    res.append((j,k))\n                j=k+3\n            else:\n                j+=3\n    return res\nfor st,s in [('+',seq),('-',rc)]:\n    for j,k in orfs(s):\n        if st=='+':\n            print(f\"  + strand  {j+1:>5}-{k+2:<5} ({(k-j)//3} aa)\")\n        else:\n            print(f\"  - strand  {n-k-2+1:>5}-{n-j:<5} ({(k-j)//3} aa)\")\n\nprint()\nprint(\"=== Coverage by ORFs (union of >=90nt ORFs) over 3000 bp ===\")\ncov=set()\nfor st,s in [('+',seq),('-',rc)]:\n    for j,k in orfs(s):\n        if st=='+':\n            cov.update(range(j,k))\n        else:\n            cov.update(range(n-k-2, n-j+1))\nprint(\"covered:\", len(cov), f\"({len(cov)/n*100:.0f}%)\")\n"
+      },
+      "is_error": false,
+      "output_chars": 730,
+      "nt_run": 0
+    },
+    {
+      "turn": 9,
+      "name": "run_python",
+      "input": {
+        "code": "\nimport random, re\nseq=\"\"\nwith open(\"region.fasta\") as f:\n    lines=f.read().splitlines()\nseq=\"\".join(lines[1:]).upper()\nn=len(seq)\ndef revcomp(s):\n    comp={'A':'T','T':'A','G':'C','C':'G','N':'N'}\n    return \"\".join(comp[c] for c in reversed(s))\nstops={'TAA','TAG','TGA'}\n\ndef longest_orf_atg(s):\n    best=0\n    for fr in range(3):\n        j=fr\n        while j<len(s)-2:\n            if s[j:j+3]=='ATG':\n                k=j\n                while k<len(s)-2 and s[k:k+3] not in stops: k+=3\n                best=max(best,k-j); j=k+3\n            else: j+=3\n    return best\n\nobs=max(longest_orf_atg(seq), longest_orf_atg(revcomp(seq)))\nrandom.seed(7)\nL=[]; C=[]\nletters=list(seq)\nfor _ in range(300):\n    random.shuffle(letters); sh=\"\".join(letters)\n    L.append(max(longest_orf_atg(sh), longest_orf_atg(revcomp(sh))))\nL.sort()\nprint(\"Longest ATG->stop ORF (nt): observed=%d ; shuffled max=%d 99th=%d mean=%.0f\"%(obs,L[-1],L[int(.99*len(L))],sum(L)/len(L)))\n\nprot=\"MEILMASSNLIKQLQERGLVAQVTDEEALAERLAQGPIALYCGFDPTADSLHLGHLVPLLCLKRFQQAGHKPVALVGGATGLIGDPSFKAAERKLNTEETVQEWVDKIRKQVAPFLDFDCGENSAIAANNYDWFGNMNVLTFLRDIGKHFSVNQMINKEAVKQRLNREDQGISFTEFSYNLLQGYDFACLNKQYGVVLQIGGSDQWGNITSGIDLTRRLHQNQVFGLTVPLITKADGTKFGKTEGGAVWLDPKKTSPYKFYQFWINTADADVYRFLKFFTFMSIEEINALEEEDKNSGKAPRAQYVLAEQVTRLVHGEEGLQAAKRITECLFSGSLSALSEADFEQLAQDGVPMVEMEKGADLMQALVDSELQPSRGQARKTIASNAITINGEKQSDPEYFFKEEDRLFGRFTLLRRGKKNYCLICWK\"\nprint(\"\\nProtein motif scans:\")\nchecks={\n 'P-loop (GxxxxGK[ST])': r'[AG].{4}GK[ST]',\n 'Walker B (hhhhDE)': r'[ILVFMWYAC]{4}DE',\n 'N-glycosylation (N{P}[ST]{P})': r'N[^P][ST][^P]',\n 'C2H2 zinc finger': r'C.{2,4}C.{3}[LIVMFYWC].{8}H.{3,5}H',\n 'CxxC': r'C..C',\n 'Leucine-rich heptad': r'L.{6}L.{6}L',\n 'RGD': r'RGD',\n 'HTH-ish (helix-turn-helix loose)': r'[KR].{3}[KR].{5}[LIVMFY].{3}[LIVMFY]',\n 'ATP/GTP-binding GxxGxG': r'G..G.G',\n}\nfor name,p in checks.items():\n    hits=[(m.start()+1,m.group()) for m in re.finditer(p,prot)]\n    print(f\"  {name}: {hits[:8]}\")\n\nprint(\"\\nN-terminus (first 40 aa):\", prot[:40])\nprint(\"C-terminus (last 30 aa):\", prot[-30:])\n"
+      },
+      "is_error": false,
+      "output_chars": 500,
+      "nt_run": 0
+    },
+    {
+      "turn": 10,
+      "name": "run_python",
+      "input": {
+        "code": "\nimport random\nseq=\"\"\nwith open(\"region.fasta\") as f:\n    lines=f.read().splitlines()\nseq=\"\".join(lines[1:]).upper()\nn=len(seq)\ndef revcomp(s):\n    comp={'A':'T','T':'A','G':'C','C':'G','N':'N'}\n    return \"\".join(comp[c] for c in reversed(s))\nrc=revcomp(seq)\nstops={'TAA','TAG','TGA'}\ncodon_table = {\n 'TTT':'F','TTC':'F','TTA':'L','TTG':'L','CTT':'L','CTC':'L','CTA':'L','CTG':'L',\n 'ATT':'I','ATC':'I','ATA':'I','ATG':'M','GTT':'V','GTC':'V','GTA':'V','GTG':'V',\n 'TCT':'S','TCC':'S','TCA':'S','TCG':'S','CCT':'P','CCC':'P','CCA':'P','CCG':'P',\n 'ACT':'T','ACC':'T','ACA':'T','ACG':'T','GCT':'A','GCC':'A','GCA':'A','GCG':'A',\n 'TAT':'Y','TAC':'Y','TAA':'*','TAG':'*','CAT':'H','CAC':'H','CAA':'Q','CAG':'Q',\n 'AAT':'N','AAC':'N','AAA':'K','AAG':'K','GAT':'D','GAC':'D','GAA':'E','GAG':'E',\n 'TGT':'C','TGC':'C','TGA':'*','TGG':'W','CGT':'R','CGC':'R','CGA':'R','CGG':'R',\n 'AGT':'S','AGC':'S','AGA':'R','AGG':'R','GGT':'G','GGC':'G','GGA':'G','GGG':'G'}\n\n# exact main ORF\nj,k=1049,2336  # rc 0-based, ATG...TAA inclusive\nprint(\"Main ORF: rc[%d:%d], ATG=%s stop=%s\"%(j,k,rc[j:j+3],rc[k-3:k]))\nprint(\"Top-strand coordinates:\")\nprint(\"  start codon (ATG):\", n-(j+2)+1, \"-\", n-j+1)\nprint(\"  stop codon (TAA):\", n-(k-1)+1, \"-\", n-(k-3)+1)\nprint(\"  full gene span:\", n-(k-1)+1, \"-\", n-j+1)\nprot=\"\".join(codon_table[rc[i:i+3]] for i in range(j,k-3,3))\nprint(\"Protein (%d aa):\"%len(prot))\nprint(prot)\n\n# second ORF significance: distribution of 2nd-longest ATG->stop ORF in shuffles\ndef orflens(s):\n    L=[]\n    for fr in range(3):\n        p=fr\n        while p<len(s)-2:\n            if s[p:p+3]=='ATG':\n                q=p\n                while q<len(s)-2 and s[q:q+3] not in stops: q+=3\n                L.append(q-p); p=q+3\n            else: p+=3\n    return sorted(L,reverse=True)\nobs=sorted(orflens(seq)+orflens(rc),reverse=True)\nprint(\"\\nTop 6 observed ATG->stop ORF lengths (nt):\", obs[:6])\nrandom.seed(3)\nsecond=[]; first=[]\nletters=list(seq)\nfor _ in range(300):\n    random.shuffle(letters); sh=\"\".join(letters)\n    o=sorted(orflens(sh)+orflens(revcomp(sh)),reverse=True)\n    first.append(o[0]); second.append(o[1] if len(o)>1 else 0)\nsecond.sort(); first.sort()\nprint(\"Shuffled: 1st-longest 99th pct=%d, max=%d\"%(first[int(.99*len(first))],first[-1]))\nprint(\"Shuffled: 2nd-longest 99th pct=%d, max=%d\"%(second[int(.99*len(second))],second[-1]))\n"
+      },
+      "is_error": false,
+      "output_chars": 769,
+      "nt_run": 0
+    },
+    {
+      "turn": 11,
+      "name": "run_python",
+      "input": {
+        "code": "\nimport random\nseq=\"\"\nwith open(\"region.fasta\") as f:\n    lines=f.read().splitlines()\nseq=\"\".join(lines[1:]).upper()\nn=len(seq)\ndef revcomp(s):\n    comp={'A':'T','T':'A','G':'C','C':'G','N':'N'}\n    return \"\".join(comp[c] for c in reversed(s))\nstops={'TAA','TAG','TGA'}\ndef orfs(s):\n    res=[]\n    for fr in range(3):\n        p=fr\n        while p<len(s)-2:\n            if s[p:p+3]=='ATG':\n                q=p\n                while q<len(s)-2 and s[q:q+3] not in stops: q+=3\n                res.append(q-p); p=q+3\n            else: p+=3\n    return res\n\nobs=sorted(orfs(seq)+orfs(revcomp(seq)),reverse=True)\nprint(\"Observed ORF lengths >=300 nt:\", [x for x in obs if x>=300])\nfor thr in [300,400,450]:\n    print(f\"  #ORFs >= {thr} nt: {sum(1 for x in obs if x>=thr)}\")\n\nrandom.seed(11)\nletters=list(seq)\ncounts={300:[],400:[],450:[]}\nfor _ in range(500):\n    random.shuffle(letters); sh=\"\".join(letters)\n    o=orfs(sh)+orfs(revcomp(sh))\n    for thr in counts:\n        counts[thr].append(sum(1 for x in o if x>=thr))\nprint(\"\\nShuffled (500 reps) counts distribution / observed:\")\nfor thr in counts:\n    d=counts[thr]\n    print(f\"  >= {thr} nt: shuffled mean={sum(d)/len(d):.2f}, 99th={sorted(d)[int(.99*len(d))]}, max={max(d)} | OBSERVED={sum(1 for x in obs if x>=thr)}\")\n"
+      },
+      "is_error": false,
+      "output_chars": 354,
+      "nt_run": 0
+    },
+    {
+      "turn": 12,
+      "name": "run_python",
+      "input": {
+        "code": "\nimport random, math\nfrom collections import Counter\nseq=\"\"\nwith open(\"region.fasta\") as f:\n    lines=f.read().splitlines()\nseq=\"\".join(lines[1:]).upper()\nn=len(seq)\ndef revcomp(s):\n    comp={'A':'T','T':'A','G':'C','C':'G','N':'N'}\n    return \"\".join(comp[c] for c in reversed(s))\nstops={'TAA','TAG','TGA'}\n\nprint(\"=== Dinucleotide odds ratios (obs/exp) ===\")\nbases=\"ACGT\"\ncnt=Counter(seq[i:i+2] for i in range(n-1))\nfreq={c:seq.count(c)/n for c in bases}\nfor a in bases:\n    row=[]\n    for b in bases:\n        exp=freq[a]*freq[b]*(n-1)\n        row.append(f\"{a}{b}:{cnt[a+b]/exp:.2f}\")\n    print(\"  \"+\"  \".join(row))\n\ndef orfs(s):\n    res=[]\n    for fr in range(3):\n        p=fr\n        while p<len(s)-2:\n            if s[p:p+3]=='ATG':\n                q=p\n                while q<len(s)-2 and s[q:q+3] not in stops: q+=3\n                res.append(q-p); p=q+3\n            else: p+=3\n    return res\nobs=orfs(seq)+orfs(revcomp(seq))\nprint(\"\\nObserved long ORFs:\", sorted([x for x in obs if x>=300],reverse=True))\n\n# Order-1 Markov generator preserving dinucleotide frequencies\ndef gen_markov(n):\n    # build transition counts\n    trans={a:Counter() for a in bases}\n    for i in range(n-1):\n        trans[seq[i]][seq[i+1]]+=1\n    # start state distribution = mononucleotide freq\n    out=[]\n    cur=random.choices(bases, weights=[freq[b] for b in bases])[0]\n    for _ in range(n-1):\n        out.append(cur)\n        c=trans[cur]\n        tot=sum(c.values())\n        cur=random.choices(bases, weights=[c[b] for b in bases])[0]\n    out.append(cur)\n    return \"\".join(out)\n\nrandom.seed(5)\nprint(\"\\n=== Order-1 Markov null (500 reps) ===\")\nmaxs=[]; counts450=[]; counts300=[]\nfor _ in range(500):\n    sh=gen_markov(n)\n    o=orfs(sh)+orfs(revcomp(sh))\n    o.sort(reverse=True)\n    maxs.append(o[0]); counts300.append(sum(1 for x in o if x>=300)); counts450.append(sum(1 for x in o if x>=450))\nmaxs.sort(); counts300.sort(); counts450.sort()\nprint(\"Longest ORF: obs=%d | markov mean=%.0f 99th=%d max=%d\"%(max(obs),sum(maxs)/len(maxs),maxs[int(.99*len(maxs))],maxs[-1]))\nprint(\"#ORFs>=300: obs=%d | markov mean=%.2f 99th=%d max=%d\"%(sum(1 for x in obs if x>=300),sum(counts300)/len(counts300),counts300[int(.99*len(counts300))],counts300[-1]))\nprint(\"#ORFs>=450: obs=%d | markov mean=%.2f 99th=%d max=%d\"%(sum(1 for x in obs if x>=450),sum(counts450)/len(counts450),counts450[int(.99*len(counts450))],counts450[-1]))\n\nprint(\"\\n=== Period-3 (Fourier) power at frequency 1/3 ===\")\nimport cmath\ndef p3(s):\n    N=len(s)\n    tot=0\n    for f in (N//3,):\n        S=sum((1 if s[i] in 'GC' else 0)*cmath.exp(-2j*math.pi*f*i/N) for i in range(N))\n        tot+=abs(S)**2/N\n    return tot\nprint(\"  observed:\", round(p3(seq),1))\nrandom.seed(1)\nvals=[]\nfor _ in range(200):\n    sh=list(seq); random.shuffle(sh); vals.append(p3(\"\".join(sh)))\nvals.sort()\nprint(\"  shuffled mean=%.1f 99th=%.1f\"%(sum(vals)/len(vals), vals[int(.99*len(vals))]))\n"
+      },
+      "is_error": false,
+      "output_chars": 532,
+      "nt_run": 0
+    },
+    {
+      "turn": 13,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq=\"\"\nwith open(\"region.fasta\") as f:\n    lines=f.read().splitlines()\nseq=\"\".join(lines[1:]).upper()\nn=len(seq)\ndef revcomp(s):\n    c={'A':'T','T':'A','G':'C','C':'G','N':'N'}\n    return \"\".join(c[x] for x in reversed(s))\nrc=revcomp(seq)\nstops={'TAA','TAG','TGA'}\nct={'TTT':'F','TTC':'F','TTA':'L','TTG':'L','CTT':'L','CTC':'L','CTA':'L','CTG':'L','ATT':'I','ATC':'I','ATA':'I','ATG':'M','GTT':'V','GTC':'V','GTA':'V','GTG':'V','TCT':'S','TCC':'S','TCA':'S','TCG':'S','CCT':'P','CCC':'P','CCA':'P','CCG':'P','ACT':'T','ACC':'T','ACA':'T','ACG':'T','GCT':'A','GCC':'A','GCA':'A','GCG':'A','TAT':'Y','TAC':'Y','TAA':'*','TAG':'*','CAT':'H','CAC':'H','CAA':'Q','CAG':'Q','AAT':'N','AAC':'N','AAA':'K','AAG':'K','GAT':'D','GAC':'D','GAA':'E','GAG':'E','TGT':'C','TGC':'C','TGA':'*','TGG':'W','CGT':'R','CGC':'R','CGA':'R','CGG':'R','AGT':'S','AGC':'S','AGA':'R','AGG':'R','GGT':'G','GGC':'G','GGA':'G','GGG':'G'}\ndef tr(s): return \"\".join(ct.get(s[i:i+3],'?') for i in range(0,len(s)-2,3))\n\nprint(\"Complete ORFs (ATG..stop), >=120 nt, both strands:\")\nprint(f\"{'strand':6}{'genome coords':>16}{'nt':>6}{'aa':>5}  frame\")\nrows=[]\nfor st,s in [('+',seq),('-',rc)]:\n    for fr in range(3):\n        p=fr\n        while p<len(s)-2:\n            if s[p:p+3]=='ATG':\n                q=p\n                while q<len(s)-2 and s[q:q+3] not in stops: q+=3\n                L=q-p\n                if L>=300:\n                    if st=='+': gs,ge=p+1,q+2\n                    else: gs,ge=n-q-2+1,n-p\n                    rows.append((min(gs,ge),st,gs,ge,L,L//3))\n                p=q+3\n            else: p+=3\nrows.sort()\nfor _,st,gs,ge,L,aa in rows:\n    print(f\"{st:6}{gs:>7}-{ge:<8}{L:>6}{aa:>5}\")\n\n# truncated minus-strand ORF going to region boundary\nprint(\"\\nAlso: minus-strand ORF starting at 604-606 (ATG) extends through position 1 (truncated by region boundary).\")\nprint(\"      minus-strand ORF also continues past the 666-1951 gene... checking 5' of 666:\")\n# find ORF ending exactly at genome coord 1 region\n# rc end: ORF with ATG near rc 2395\np=2395-1\nprint(\"      rc[2394:2397]=\",rc[2394:2397],\"-> protein start:\",tr(rc[2394:2394+30]))\n\nprint()\nprint(\"GC3 for the 428-aa gene:\")\norfc=[rc[i:i+3] for i in range(1049,2333,3)]\nprint(\"  codons:\",len(orfc),\"GC3=%.1f%%\"%(100*sum(1 for c in orfc if c[2] in 'GC')/len(orfc)))\nprint(\"  overall GC=%.1f%%\"%(100*sum(seq.count(x) for x in 'GC')/n))\n"
+      },
+      "is_error": false,
+      "output_chars": 578,
+      "nt_run": 0
+    },
+    {
+      "turn": 14,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq=\"\"\nwith open(\"region.fasta\") as f:\n    lines=f.read().splitlines()\nseq=\"\".join(lines[1:]).upper()\nn=len(seq)\ndef revcomp(s):\n    c={'A':'T','T':'A','G':'C','C':'G','N':'N'}\n    return \"\".join(c[x] for x in reversed(s))\n\nprot428=\"MEILMASSNLIKQLQERGLVAQVLAQGPIALLCGFDPTADSLHLGHLVPLLCLKRFQQAGHKPVALVGGATGLIGDPSFKAAERKLNTEETVQEWVDKIRKQVAPFLDFDCGENSAIAANNYDWFGNMNVLTFLRDIGKHFSVNQMINKEAVKQRLNREDQGISFTEFSYNLLQGYDFACLNKQYGVVLQIGGSDQWGNITSGIDLTRRLHQNQVFGLTVPLITKADGTKFGKTEGGAVWLDPKKTSPYKFYQFWINTADADVYRFLKFFTFMSIEEINALEEEDKNSGKAPRAQYVLAEQVTRLVHGEEGLQAAKRITECLFSGSLSALSEADFEQLAQDGVPMVEMEKGADLMQALVDSELQPSRGQARKTIASNAITINGEKQSDPEYFFKEEDRLFGRFTLLRRGKKNYCLICWK\"\n# (that string intentionally not used; recompute properly below)\n\nct={'TTT':'F','TTC':'F','TTA':'L','TTG':'L','CTT':'L','CTC':'L','CTA':'L','CTG':'L','ATT':'I','ATC':'I','ATA':'I','ATG':'M','GTT':'V','GTC':'V','GTA':'V','GTG':'V','TCT':'S','TCC':'S','TCA':'S','TCG':'S','CCT':'P','CCC':'P','CCA':'P','CCG':'P','ACT':'T','ACC':'T','ACA':'T','ACG':'T','GCT':'A','GCC':'A','GCA':'A','GCG':'A','TAT':'Y','TAC':'Y','TAA':'*','TAG':'*','CAT':'H','CAC':'H','CAA':'Q','CAG':'Q','AAT':'N','AAC':'N','AAA':'K','AAG':'K','GAT':'D','GAC':'D','GAA':'E','GAG':'E','TGT':'C','TGC':'C','TGA':'*','TGG':'W','CGT':'R','CGC':'R','CGA':'R','CGG':'R','AGT':'S','AGC':'S','AGA':'R','AGG':'R','GGT':'G','GGC':'G','GGA':'G','GGG':'G'}\n\n# Directly scan the top strand for the reverse-strand gene by translating revcomp windows\nbest=None\nfor start in range(0,n-2):\n    if seq[start:start+3] == revcomp('TAA')[::-1] if False else False:\n        pass\n# Simpler: scan minus strand for ATG..stop, record top coords\ndef scan_minus():\n    res=[]\n    s=revcomp(seq)\n    for fr in range(3):\n        p=fr\n        while p<len(s)-2:\n            if s[p:p+3]=='ATG':\n                q=p\n                while q<len(s)-2 and s[q:q+3] not in ('TAA','TAG','TGA'): q+=3\n                if q-p>=300:\n                    # top coords: rc index i -> top position n-i\n                    top_start = n-p      # position of first base of ATG (highest coord)\n                    top_stop  = n-(q+2)  # position of first base of stop (lowest coord)\n                    res.append((top_stop, top_start, q-p, q+2))\n                p=q+3\n            else: p+=3\n    return res\nfor top_stop, top_start, L, qend in scan_minus():\n    # extract by slicing the top strand and reverse-complementing\n    sub = revcomp(seq[top_stop-1:top_start])\n    prot = \"\".join(ct[sub[i:i+3]] for i in range(0,len(sub)-3,3))\n    stop = sub[-3:]\n    print(f\"minus-strand ORF: top coords {top_stop}-{top_start} ({L} nt, {L//3} aa) stop={stop}\")\n    if L//3==428:\n        print(\"   protein:\", prot)\n        print(\"   start codon top coords 1949-1951:\", seq[1948:1951], \"| stop codon top coords 665-667:\", seq[664:667])\n"
+      },
+      "is_error": false,
+      "output_chars": 708,
+      "nt_run": 0
+    },
+    {
+      "turn": 15,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq=\"\"\nwith open(\"region.fasta\") as f:\n    lines=f.read().splitlines()\nseq=\"\".join(lines[1:]).upper()\nn=len(seq)\ndef rc(s):\n    c={'A':'T','T':'A','G':'C','C':'G','N':'N'}\n    return \"\".join(c[x] for x in reversed(s))\nstops={'TAA','TAG','TGA'}\nct={'TTT':'F','TTC':'F','TTA':'L','TTG':'L','CTT':'L','CTC':'L','CTA':'L','CTG':'L','ATT':'I','ATC':'I','ATA':'I','ATG':'M','GTT':'V','GTC':'V','GTA':'V','GTG':'V','TCT':'S','TCC':'S','TCA':'S','TCG':'S','CCT':'P','CCC':'P','CCA':'P','CCG':'P','ACT':'T','ACC':'T','ACA':'T','ACG':'T','GCT':'A','GCC':'A','GCA':'A','GCG':'A','TAT':'Y','TAC':'Y','TAA':'*','TAG':'*','CAT':'H','CAC':'H','CAA':'Q','CAG':'Q','AAT':'N','AAC':'N','AAA':'K','AAG':'K','GAT':'D','GAC':'D','GAA':'E','GAG':'E','TGT':'C','TGC':'C','TGA':'*','TGG':'W','CGT':'R','CGC':'R','CGA':'R','CGG':'R','AGT':'S','AGC':'S','AGA':'R','AGG':'R','GGT':'G','GGC':'G','GGA':'G','GGG':'G'}\ndef tr(s): return \"\".join(ct.get(s[i:i+3],'?') for i in range(0,len(s)-3,3))\n\nprint(\"ORFs (ATG..stop codon) >= 200 nt, both strands, 1-based top-strand coords:\")\nprint(f\"{'strand':>7} {'top coords':>14} {'nt(+stop)':>10} {'aa':>5}  {'start':>5} {'stop':>4}\")\ntable=[]\n# plus strand\nfor fr in range(3):\n    p=fr\n    while p<n-2:\n        if seq[p:p+3]=='ATG':\n            q=p\n            while q<n-2 and seq[q:q+3] not in stops: q+=3\n            if q-p>=200: table.append(('+',p+1,q+3,q-p,q,q+3))\n            p=q+3\n        else: p+=3\n# minus strand\ns=rc(seq)\nfor fr in range(3):\n    p=fr\n    while p<len(s)-2:\n        if s[p:p+3]=='ATG':\n            q=p\n            while q<len(s)-2 and s[q:q+3] not in stops: q+=3\n            if q-p>=200: table.append(('-',n-(q+2),n-p,q-p,p,q+2))\n            p=q+3\n        else: p+=3\ntable.sort(key=lambda x:x[1])\nfor st,a,b,L,p,q in table:\n    if st=='+':\n        sub=seq[a-1:b]; start=seq[p:p+3]; stop=seq[q:q+3]\n    else:\n        sub=rc(seq[a-1:b]); start=rc(seq[a-1:a+2]); stop=rc(seq[b-3:b])\n    print(f\"{st:>7} {a:>6}-{b:<7} {b-a+1:>10} {L//3:>5}  {start:>5} {stop:>4}\")\n\nprint()\nprint(\"Reverse-strand 428-aa gene: top 665-1951 (1287 nt incl. stop); ATG=CAT at 1949-1951, TAA=TTA at 665-667\")\nprint(\"Protein length:\", len(tr(rc(seq[664:1951]))), \"aa\")\n"
+      },
+      "is_error": false,
+      "output_chars": 723,
+      "nt_run": 0
+    }
+  ],
+  "turns": [
+    {
+      "input_tokens": 2045,
+      "output_tokens": 156,
+      "cached_tokens": 0,
+      "tool_calls": 2,
+      "seconds": 1.6
+    },
+    {
+      "input_tokens": 2268,
+      "output_tokens": 504,
+      "cached_tokens": 2048,
+      "tool_calls": 1,
+      "seconds": 2.8
+    },
+    {
+      "input_tokens": 2919,
+      "output_tokens": 1168,
+      "cached_tokens": 2688,
+      "tool_calls": 1,
+      "seconds": 5.3
+    },
+    {
+      "input_tokens": 4340,
+      "output_tokens": 1285,
+      "cached_tokens": 3968,
+      "tool_calls": 1,
+      "seconds": 5.7
+    },
+    {
+      "input_tokens": 5941,
+      "output_tokens": 7398,
+      "cached_tokens": 5504,
+      "tool_calls": 1,
+      "seconds": 36.7
+    },
+    {
+      "input_tokens": 13951,
+      "output_tokens": 4483,
+      "cached_tokens": 13312,
+      "tool_calls": 1,
+      "seconds": 22.4
+    },
+    {
+      "input_tokens": 18742,
+      "output_tokens": 1710,
+      "cached_tokens": 18432,
+      "tool_calls": 1,
+      "seconds": 8.7
+    },
+    {
+      "input_tokens": 21253,
+      "output_tokens": 4648,
+      "cached_tokens": 20352,
+      "tool_calls": 1,
+      "seconds": 22.3
+    },
+    {
+      "input_tokens": 26138,
+      "output_tokens": 5759,
+      "cached_tokens": 25856,
+      "tool_calls": 1,
+      "seconds": 29.1
+    },
+    {
+      "input_tokens": 32200,
+      "output_tokens": 2716,
+      "cached_tokens": 31872,
+      "tool_calls": 1,
+      "seconds": 13.7
+    },
+    {
+      "input_tokens": 35136,
+      "output_tokens": 6003,
+      "cached_tokens": 34816,
+      "tool_calls": 1,
+      "seconds": 27.7
+    },
+    {
+      "input_tokens": 41530,
+      "output_tokens": 3184,
+      "cached_tokens": 41088,
+      "tool_calls": 1,
+      "seconds": 14.1
+    },
+    {
+      "input_tokens": 44889,
+      "output_tokens": 3365,
+      "cached_tokens": 44672,
+      "tool_calls": 1,
+      "seconds": 15.8
+    },
+    {
+      "input_tokens": 48529,
+      "output_tokens": 6443,
+      "cached_tokens": 48128,
+      "tool_calls": 1,
+      "seconds": 30.4
+    },
+    {
+      "input_tokens": 55177,
+      "output_tokens": 2621,
+      "cached_tokens": 54912,
+      "tool_calls": 1,
+      "seconds": 11.3
+    },
+    {
+      "input_tokens": 58153,
+      "output_tokens": 2195,
+      "cached_tokens": 57728,
+      "tool_calls": 1,
+      "seconds": 9.2
+    },
+    {
+      "input_tokens": 60615,
+      "output_tokens": 2952,
+      "cached_tokens": 60288,
+      "tool_calls": 0,
+      "seconds": 14.6
+    }
+  ],
+  "request_ids": [
+    "22f2f723-f03d-418d-bef9-4e3c7e43452e",
+    "4b835b05-5d64-4367-8ba3-ffe1e153cb29",
+    "b6ed131d-aeed-4e36-bd9d-3f4ffec779ed",
+    "1cfb627d-8f22-4f9b-9b3d-c91581989edb",
+    "d3ad8579-27f9-482c-8d91-e62e240164d5",
+    "8e3d5dd9-f195-4b35-a33b-186437777c27",
+    "b4c99f04-06a1-409b-ae2e-bceec1aaa7b7",
+    "77601867-bdb9-4d21-a202-00c2e69075ad",
+    "68319228-24c3-4e11-b9bc-e80cbda113b2",
+    "f1699173-347c-4a90-a35d-d026bfba15bc",
+    "5fbf4922-4c4f-4328-90e1-f521a1dd3978",
+    "92053df4-4e9d-4e8f-a048-73e2844a7faf",
+    "916dc90f-3782-4326-9ffa-e3906f6b904c",
+    "12bd7256-22a6-428a-a688-6b270189623a",
+    "81bc8d6b-356b-4897-b08a-3a2788647564",
+    "49ed6d91-0f5f-4bce-9827-8a3072331047",
+    "9fbfaf99-6845-4832-bf8c-9c102af00f15"
+  ],
+  "served_models": [
+    "deepseek-v4.1-flash"
+  ],
+  "input_tokens": 473826,
+  "output_tokens": 56590,
+  "cached_tokens": 465664,
+  "status": "end_turn",
+  "forced_report": false,
+  "refusal_category": null,
+  "report": "I now have a consistent picture. Here is my report.\n\n---\n\n# Report on `region.fasta` (`region_001`)\n\n## Sequence basics\n- **Length:** 3,000 bp; single record, no ambiguity codes.\n- **Base composition:** A 725, C 802, G 725, T 748 \u2192 **50.9 % GC** (very close to balanced).\n- **Repeat content:** no exact direct repeat \u2265 15 bp; longest homopolymer is only 5 nt. No evidence of a tandem-repeat array, mobile element, or palindrome.\n- **Dinucleotide skew (notable):** strong depletion of **TpA (0.62\u00d7 expected)** with enrichment of **TpT (1.36\u00d7)** \u2014 a pattern typical of protein-coding DNA rather than random/intergenic sequence.\n\n## Main feature: a long protein-coding open reading frame (reverse strand)\nThe sequence contains one conspicuously long ORF, on the **reverse (minus) strand**:\n\n| Feature | Coordinates (plus-strand, 1-based, inclusive) |\n|---|---|\n| Start codon **ATG** (appears as CAT on the plus strand) | **1949\u20131951** |\n| Stop codon **TAA** (appears as TTA on the plus strand) | **665\u2013667** |\n| Full gene span | **665\u20131951** (1,287 nt incl. stop) |\n| Coding length | 1,284 nt = **428 codons / 428-aa protein** |\n\n**Statistical support:** in 500 composition-matched randomisations the longest ORF reached only ~660\u2013860 nt (depending on the null model), and in dinucleotide-preserving (order-1 Markov) controls the maximum was 864 nt. The observed 1,284-nt ORF is therefore **far longer than expected by chance** and is a convincing coding region. It also shows a coding signature: **GC at 3rd codon positions = 60 %**, versus 51 % overall.\n\n**Encoded protein (428 aa):**\n```\nMEILMASSNLIKQLQERGLVAQVTDEEALAERLAQGPIALYCGFDPTADSLHLGHLVPLLCLKRFQQAGHKPVALVGGATGLIGDPSFKAAERKLNTEETVQEWVDKIRKQVAPFLDFDCGENSAIAANNYDWFGNMNVLTFLRDIGKHFSVNQMINKEAVKQRLNREDQGISFTEFSYNLLQGYDFACLNKQYGVVLQIGGSDQWGNITSGIDLTRRLHQNQVFGLTVPLITKADGTKFGKTEGGAVWLDPKKTSPYKFYQFWINTADADVYRFLKFFTFMSIEEINALEEEDKNSGKAPRAQYVLAEQVTRLVHGEEGLQAAKRITECLFSGSLSALSEADFEQLAQDGVPMVEMEKGADLMQALVDSELQPSRGQARKTIASNAITINGEKQSDPEYFFKEEDRLFGRFTLLRRGKKNYCLICWK\n```\nProperties: hydrophilic/globular (**GRAVY \u22120.32**, no Kyte\u2013Doolittle window above 1.6 \u2192 **no predicted transmembrane helices**), estimated **pI \u2248 6.1**. Seven cysteines (positions 42, 61, 120, 189, 330, 423, 426), including a **CxxC motif (Cys423\u2013Cys426, \"CLIC\")** near the C-terminus, which could support a metal/disulfide-related role.\n\n## The region is unusually gene-dense\nSeveral other long ORFs also stand out (all \u2265 ~200 nt), on both strands:\n\n| Strand | Coordinates (plus-strand) | Length | Protein |\n|---|---|---|---|\n| \u2212 | 665\u20131951 | 1,287 nt | 428 aa (described above) |\n| \u2212 | 2068\u20132724 | 657 nt | 218 aa |\n| \u2212 | 1\u2013606 | 609 nt | 202 aa (truncated by the region's 5\u2032 end) |\n| + | 1,996\u20132,517 | 522 nt | 173 aa |\n| + | 1,292\u20131,774 | 483 nt | 160 aa |\n| + | 2,689\u20132,922 | 234 nt | 77 aa |\n| + | 139\u2013369 | 231 nt | 76 aa |\n| + | 430\u2013660 | 231 nt | 76 aa |\n| + | 2,205\u20132,429 | 225 nt | 74 aa |\n\nRandomised controls rarely produce more than ~2 ORFs \u2265 450 nt, yet this sequence has **five** (1,284 / 654 / 606 / 519 / 480 nt), with several genes overlapping on opposite strands. This density, plus the TpA depletion and period-3 signal, indicates the region is **coding-rich** (more like a compact bacterial/viral genome than random DNA), rather than a single isolated gene.\n\n## What I could *not* find\n- No matches to common regulatory/structural motifs (TATA box, \u221210/\u221235 promoters, Shine\u2013Dalgarno, Chi, DnaA box) and no convincing Rho-independent terminator hairpin (only weak 8-bp stems).\n- No recognizable protein family signature in the 428-aa product by motif scanning (no P-loop, Walker-B, zinc-finger, HTH, or classical Rossmann glycine pattern).\n\n## Caveat\nNo sequence database was available in this environment, so the biological identity/function of the gene(s) could not be assigned by homology. The most useful next step would be to run the 428-aa protein (and the other ORFs) against a protein database (BLASTp/HMMER) \u2014 that is what would turn \"a long ORF at 665\u20131951\" into a named function.\n\n**Bottom line:** Far from being featureless, the region contains a strong protein-coding signal \u2014 most prominently a **428-aa ORF on the reverse strand at coordinates 665\u20131951**, embedded in an unusually gene-dense, coding-like sequence.",
+  "nt_run_from_tools": 30,
+  "seen_intervals": [],
+  "tool_errors": 0,
+  "seconds": 278.8,
+  "provider": "opencode-go",
+  "rep": 0,
+  "claims": {
+    "features": [
+      {
+        "type": "gene",
+        "start": 665,
+        "end": 1951,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "long reverse-strand ORF, 428 aa, GC3=60%"
+      },
+      {
+        "type": "gene",
+        "start": 2068,
+        "end": 2724,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "reverse-strand ORF, 218 aa"
+      },
+      {
+        "type": "gene",
+        "start": 1,
+        "end": 606,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "reverse-strand ORF truncated at 5' end, 202 aa"
+      },
+      {
+        "type": "gene",
+        "start": 1996,
+        "end": 2517,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "forward-strand ORF, 173 aa"
+      },
+      {
+        "type": "gene",
+        "start": 1292,
+        "end": 1774,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "forward-strand ORF, 160 aa"
+      },
+      {
+        "type": "gene",
+        "start": 2689,
+        "end": 2922,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "forward-strand ORF, 77 aa"
+      },
+      {
+        "type": "gene",
+        "start": 139,
+        "end": 369,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "forward-strand ORF, 76 aa"
+      },
+      {
+        "type": "gene",
+        "start": 430,
+        "end": 660,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "forward-strand ORF, 76 aa"
+      },
+      {
+        "type": "gene",
+        "start": 2205,
+        "end": 2429,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "forward-strand ORF, 74 aa"
+      },
+      {
+        "type": "other",
+        "start": null,
+        "end": null,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "TpA-depleted, TpT-enriched dinucleotide skew"
+      },
+      {
+        "type": "other",
+        "start": null,
+        "end": null,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "CxxC (CLIC) motif in 428-aa protein"
+      },
+      {
+        "type": "other",
+        "start": null,
+        "end": null,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "unusually gene-dense, coding-rich region"
+      }
+    ],
+    "named_identity": []
+  },
+  "judge_model": "kimi-k2.7-code"
+}

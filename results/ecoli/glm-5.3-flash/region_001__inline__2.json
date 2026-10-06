@@ -1,0 +1,387 @@
+{
+  "started_at": "2026-10-05T23:17:27+00:00",
+  "prompt_hash": "6548b398e9a9",
+  "code_hash": "7c7d70e28d52",
+  "locus": "region_001",
+  "condition": "inline",
+  "model": "glm-5.3-flash",
+  "effort": null,
+  "read_default": 2000,
+  "max_turns": 20,
+  "tool_calls": [
+    {
+      "turn": 0,
+      "name": "read_file",
+      "input": {
+        "path": "region.fasta"
+      },
+      "is_error": false,
+      "output_chars": 2028,
+      "nt_run": 1960
+    },
+    {
+      "turn": 0,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\"\nwith open(\"region.fasta\") as f:\n    for line in f:\n        if not line.startswith(\">\"):\n            seq += line.strip()\n\nprint(\"Length:\", len(seq))\nfrom collections import Counter\nc = Counter(seq)\nprint(\"Composition:\", dict(c))\ngc = (c.get(\"G\",0)+c.get(\"C\",0))/len(seq)*100\nprint(\"GC%%: %.2f\" % gc)\n\n# all 6-frame ORF scan\ndef revcomp(s):\n    return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\n\nstops = {\"TAA\",\"TAG\",\"TGA\"}\ndef orfs(s):\n    out=[]\n    for strand,seqs in ((\"+\",s),(\"-\",revcomp(s))):\n        for frame in range(3):\n            i=frame\n            start=None\n            while i+3<=len(s):\n                codon=seqs[i:i+3]\n                if codon==\"ATG\" and start is None:\n                    start=i\n                if codon in stops:\n                    if start is not None:\n                        out.append((strand, frame, start, i, i-start+3, seqs[start:i+3]))\n                        start=None\n                i+=3\n            if start is not None:\n                out.append((strand, frame, start, len(s)-1, len(s)-start, seqs[start:]))\n    return out\n\no=orfs(seq)\no=[x for x in o if x[4]>=90]\no.sort(key=lambda x:-x[4])\nprint(\"\\nTop ORFs (strand, frame, start_offset, end_offset, len_nt):\")\nfor x in o[:15]:\n    print(x[0], \"frame\", x[1], \"nt\", x[2], \"-\", x[3], \"len\", x[4])\n"
+      },
+      "is_error": false,
+      "output_chars": 622,
+      "nt_run": 0
+    },
+    {
+      "turn": 1,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\"))\nL=len(seq)\ndef revcomp(s): return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\n\n# 1) longest ORF scan (all frames both strands), require ATG start, end at stop\nstops={\"TAA\",\"TAG\",\"TGA\"}\ndef longest_orfs(s, minlen=60):\n    res=[]\n    for strand,ss in ((\"+\",s),(\"-\",revcomp(s))):\n        for f in range(3):\n            i=f; start=None\n            while i+3<=len(ss):\n                c=ss[i:i+3]\n                if c in stops:\n                    if start is not None and i+3-start>=minlen:\n                        res.append((strand,f,start,i+3-start))\n                        start=None\n                    else:\n                        start=None\n                elif c==\"ATG\" and start is None:\n                    start=i\n                i+=3\n            if start is not None and len(ss)-start>=minlen:\n                res.append((strand,f,start,len(ss)-start))\n    return res\nr=longest_orfs(seq)\nr.sort(key=lambda x:-x[3])\nprint(\"Longest ORFs (>=60 nt):\")\nfor x in r[:8]: print(\"  strand %s frame %d start %d nt, len %d nt (%d aa)\"%(x[0],x[1]+1,x[2]+1,x[3],x[3]//3))\n\n# 2) simulate random sequences with matched composition -> null distribution of longest ORF\nimport random\ncomp=[seq.count(n) for n in \"ACGT\"]\npop=[n for n,c in zip(\"ACGT\",comp) for _ in range(c)]\nrandom.seed(0)\nnull=[]\nfor _ in range(500):\n    s2=\"\".join(random.sample(pop,len(pop)))   # exact composition permutation\n    lo=longest_orfs(s2,minlen=60)\n    null.append(max(x[3] for x in lo))\nnull.sort()\nimport statistics\nprint(\"\\nNull model (same composition):\")\nprint(\"  median longest ORF %d nt, 95th pct %d nt, max %d nt  (observed %d nt)\"%(\n      statistics.median(null), null[int(0.95*len(null))], null[-1], r[0][3]))\nprint(\"  fraction of nulls with longest ORF >= observed: %d/500\"%(sum(1 for x in null if x>=r[0][3])))\n\n# 3) dinucleotide odds ratios (is it 'genomic-like'?)\nfrom collections import Counter\ndi=Counter(seq[i:i+2] for i in range(L-1))\nprint(\"\\nDinucleotide odds ratios (1.0 = no bias):\")\nnames=[\"AA\",\"AT\",\"AC\",\"AG\",\"CA\",\"CC\",\"CG\",\"CT\",\"GA\",\"GC\",\"GG\",\"GT\",\"TA\",\"TT\",\"TC\",\"TG\"]\nf1={n:seq.count(n)/L for n in \"ACGT\"}\nfor n in names:\n    exp=f1[n[0]]*f1[n[1]]\n    print(\"  %s: %.2f\"%(n, di[n]/(L-1)/exp))\n\n# 4) longest homopolymer + most common 6-mers (repeats?)\nbest=0\nfor n in \"ACGT\":\n    b=max((len(x) for x in seq.split(set(\"ACGT\")-set(n) and n or n) ), default=0)\nmx=max(len(x) for n in \"ACGT\" for x in seq.split(n) if n in x) if False else 0\nimport itertools, re\nfor n in \"ACGT\":\n    m=max(len(x) for x in re.findall(n+\"+\",seq))\n    best=max(best,m)\nprint(\"\\nLongest homopolymer run:\", best)\nkm=Counter(seq[i:i+6] for i in range(L-5))\nprint(\"Most frequent 6-mers:\", km.most_common(6))\n"
+      },
+      "is_error": false,
+      "output_chars": 976,
+      "nt_run": 0
+    },
+    {
+      "turn": 1,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\"))\n# Check the top ORFs: translate them, look at protein signals, RBS upstream\ndef revcomp(s): return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\ntable = {}\nbases=\"TCAG\"\naas=\"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\ni=0\nfor b1 in bases:\n    for b2 in bases:\n        for b3 in bases:\n            table[b1+b2+b3]=aas[i]; i+=1\ndef translate(nt):\n    return \"\".join(table[nt[i:i+3]] for i in range(0,len(nt)-2,3))\ndef scan(start,end,strand):\n    sub = seq[start:end] if strand==\"+\" else revcomp(seq[start:end])\n    return sub\n\n# ORF 1: minus strand 1049-2333 (0-based 1048..2332? define offsets), ORF 2: minus 276-930, ORF3 minus 2394-2999, ORF4 plus 1995-2514\ncands = [(\"-\",1048,2333),(\"-\",275,930),(\"-\",2393,3000),(\"+\",1994,2514)]\nfor st,s,e in cands:\n    sub = seq[s:e] if st==\"+\" else revcomp(seq[s:e])\n    prot = translate(sub)\n    prot = prot[:prot.find(\"*\")] if \"*\" in prot else prot\n    print(\"ORF %s %d-%d: %d aa; start_M=%s ; N-term25=%s\"%(st,s+1,e,len(prot),\"yes\" if prot.startswith(\"M\") else \"no\",prot[:25]))\n    # RBS search 4..15 nt upstream of first ATG\n    if sub[:3]==\"ATG\":\n        up = seq[max(0,s-15):s] if st==\"+\" else revcomp(seq[e:e+15])\n        print(\"   upstream 15nt:\", up, \" contains AGGAGG:\", \"AGGAGG\" in up or \"AGGAG\" in up)\n    # hydropathy of N-term (signal TM)\n    hyd = sum(prot[i] in \"AILMFWVY\" for i in range(0,min(30,len(prot))))\n    print(\"   first 30 aa hydrophobic-ish count:\",hyd)\n"
+      },
+      "is_error": false,
+      "output_chars": 445,
+      "nt_run": 0
+    },
+    {
+      "turn": 2,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\"))\nL=len(seq)\ndef revcomp(s): return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\nbases=\"TCAG\"; aas=\"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\ntable={}\ni=0\nfor b1 in bases:\n    for b2 in bases:\n        for b3 in bases: table[b1+b2+b3]=aas[i]; i+=1\ndef translate(nt): return \"\".join(table[nt[i:i+3]] for i in range(0,len(nt)-2,3))\n\nstops={\"TAA\",\"TAG\",\"TGA\"}\norfs=[]\nfor strand in \"+-\":\n    ss = seq if strand==\"+\" else revcomp(seq)\n    for f in range(3):\n        i=f; start=None\n        while i+3<=len(ss):\n            c=ss[i:i+3]\n            if c in stops:\n                if start is not None and i+3-start>=150:\n                    orfs.append((strand,f,start,i+3-start))\n                start=None\n            elif c==\"ATG\" and start is None: start=i\n            i+=3\n        if start is not None and len(ss)-start>=150:\n            orfs.append((strand,f,start,len(ss)-start))\n\nfor strand,f,st,ln in sorted(orfs,key=lambda x:-x[3])[:6]:\n    ss = seq if strand==\"+\" else revcomp(seq)\n    nt=ss[st:st+ln]\n    prot=translate(nt)\n    # plus-strand 1-based coords\n    if strand==\"+\":\n        p1, p2 = st+1, st+ln\n        upstream_plus = seq[max(0,p1-1-16):p1-1]\n    else:\n        p1, p2 = L-(st+ln)+1, L-st\n        upstream_plus = revcomp(seq[p2: p2+16])\n    prot_full = prot\n    prot = prot.split(\"*\")[0]\n    # degeneracy / codon usage of first ORF\n    print(\"=== ORF: strand %s  plus-coords %d..%d  (%d nt, %d aa codons incl stop)\"%(strand,p1,p2,ln,len(nt)//3))\n    print(\"    starts with ATG:\", nt[:3]==\"ATG\", \" ends in stop:\", nt[-3:]==\"TAA\" or nt[-3:]==\"TAG\" or nt[-3:]==\"TGA\")\n    print(\"    upstream (+ strand):\", upstream_plus)\n    print(\"    protein (%d aa): %s...\"%(len(prot), prot[:60]))\n    print(\"    ...tail: %s\"%prot[-20:])\n    # basic protein stats\n    from collections import Counter\n    pc=Counter(prot)\n    charged=sum(pc[a] for a in \"DEKRH\")\n    hyd=sum(pc[a] for a in \"AILMFWV\")\n    print(\"    len %d aa; charged %d; hydrophobic %d; %%\"%%  if False else\"\", end=\"\")\n    print(\"    pct hydrophobic %.1f  pct charged %.1f  MW~%.1f kDa\"%(100*hyd/len(prot),100*charged/len(prot),0.11*len(prot)))\n"
+      },
+      "is_error": false,
+      "output_chars": 211,
+      "nt_run": 0
+    },
+    {
+      "turn": 3,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\"))\nL=len(seq)\ndef revcomp(s): return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\nbases=\"TCAG\"; aas=\"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\ntable={}\ni=0\nfor b1 in bases:\n    for b2 in bases:\n        for b3 in bases: table[b1+b2+b3]=aas[i]; i+=1\ndef translate(nt): return \"\".join(table[nt[i:i+3]] for i in range(0,len(nt)-2,3))\n\nstops={\"TAA\",\"TAG\",\"TGA\"}\norfs=[]\nfor strand in \"+-\":\n    ss = seq if strand==\"+\" else revcomp(seq)\n    for f in range(3):\n        i=f; start=None\n        while i+3<=len(ss):\n            c=ss[i:i+3]\n            if c in stops:\n                if start is not None and i+3-start>=150:\n                    orfs.append((strand,f,start,i+3-start))\n                start=None\n            elif c==\"ATG\" and start is None: start=i\n            i+=3\n        if start is not None and len(ss)-start>=150:\n            orfs.append((strand,f,start,len(ss)-start))\n\nfor strand,f,st,ln in sorted(orfs,key=lambda x:-x[3])[:6]:\n    ss = seq if strand==\"+\" else revcomp(seq)\n    nt=ss[st:st+ln]\n    prot=translate(nt)\n    if strand==\"+\":\n        p1, p2 = st+1, st+ln\n        up = seq[max(0,p1-1-16):p1-1]\n    else:\n        p1, p2 = L-(st+ln)+1, L-st\n        up = revcomp(seq[p2:p2+16])\n    prot = prot.split(\"*\")[0]\n    from collections import Counter\n    pc=Counter(prot)\n    charged=sum(pc[a] for a in \"DEKRH\"); hyd=sum(pc[a] for a in \"AILMFWV\")\n    print(\"=== strand %s  +%s..%d  (%d nt, %d aa)  ATGstart=%s  stopEnd=%s\"%(\n        strand,p1,p2,ln,len(prot),nt[:3]==\"ATG\",nt[-3:] in (\"TAA\",\"TAG\",\"TGA\")))\n    print(\"    upstream 16nt:\", up)\n    print(\"    protein: %s ... %s\"%(prot[:55],prot[-15:]))\n    print(\"    hydrophobic %.0f%%  charged %.0f%%  ~%.0f kDa\"%(100*hyd/len(prot),100*charged/len(prot),0.11*len(prot)))\n    if len(prot)>428:\n        # charged residues sorted: any highly-basic region? basic count\n        bas=sum(pc[a] for a in \"KR\"); acd=sum(pc[a] for a in \"DE\")\n        print(\"    K+R=%d  D+E=%d\"%(bas,acd))\n\n# also: codon usage of the big ORF - is there a codon-degeneracy pattern like before?\nbig = [o for o in orfs if o[3]==1287][0]\nss = revcomp(seq)\nnt = ss[big[2]:big[2]+big[3]]\ncodons=[nt[i:i+3] for i in range(0,len(nt),3)]\nfrom collections import Counter\ncc=Counter(codons[:-1])\nprint(\"\\nTop codons in 1287-nt ORF (n=%d codons):\"%len(cc) if False else \"\\nTop codons in 1287-nt ORF:\")\nsyn = {\"Phe\":[\"TTT\",\"TTC\"],\"Leu\":[\"TTA\",\"TTG\",\"CTT\",\"CTC\",\"CTA\",\"CTG\"],\"Ser\":[\"TCT\",\"TCC\",\"TCA\",\"TCG\",\"AGT\",\"AGC\"],\n\"Tyr\":[\"TAT\",\"TAC\"],\"Cys\":[\"TGT\",\"TGC\"],\"Trp\":[\"TGG\"],\"Pro\":[\"CCT\",\"CCC\",\"CCA\",\"CCG\"],\"His\":[\"CAT\",\"CAC\"],\n\"Gln\":[\"CAA\",\"CAG\"],\"Arg\":[\"CGT\",\"CGC\",\"CGA\",\"CGG\",\"AGA\",\"AGG\"],\"Ile\":[\"ATT\",\"ATC\",\"ATA\"],\"Met\":[\"ATG\"],\n\"Thr\":[\"ACT\",\"ACC\",\"ACA\",\"ACG\"],\"Asn\":[\"AAT\",\"AAC\"],\"Lys\":[\"AAA\",\"AAG\"],\"Ala\":[\"GCT\",\"GCC\",\"GCA\",\"GCG\"],\n\"Asp\":[\"GAT\",\"GAC\"],\"Glu\":[\"GAA\",\"GAG\"],\"Cys2\":[\"TGT\",\"TGC\"],\"Gly\":[\"GGT\",\"GGC\",\"GGA\",\"GGG\"],\"Val\":[\"GTT\",\"GTC\",\"GTA\",\"GTG\"]}\ntot=len(codons)-1\nprint(\"   total codons(excl stop):\",tot)\n# quick check: fraction of synonymous codons families\nfam_cnt={}\nfor aa,fams in [(k,v) for k,v in [(k,sum(cc[c] for c in v if c in cc)) for k,v in [(k,vv) for k,vv in syn.items()]]]:\n    pass\ncntsyn=sum(1 for i,c in enumerate(codons[:-1]) if any(c in v for v in syn.values() if len(v)>1))\nprint(\"   fraction of codons from >1-codon families: %.2f\"%(cntsyn/tot))\n# which amino acids are ABSENT from the protein?\nused={aa for c in cc for aa in [table.get(c,'X')] if len(c)==3}\nprint(\"   residues used:\", \"\".join(sorted(used)))\nmissing=set(aas.replace(\"*\",\"\"))-used\nprint(\"   residues never sampled:\", \"\".join(sorted(missing)))\n"
+      },
+      "is_error": false,
+      "output_chars": 1613,
+      "nt_run": 0
+    },
+    {
+      "turn": 4,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\"))\nL=len(seq)\ndef revcomp(s): return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\nbases=\"TCAG\"; aas=\"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\ntable={}; j=0\nfor b1 in bases:\n    for b2 in bases:\n        for b3 in bases: table[b1+b2+b3]=aas[j]; j+=1\none={\"A\":\"A\",\"R\":\"R\",\"N\":\"N\",\"D\":\"D\",\"C\":\"C\",\"Q\":\"Q\",\"E\":\"E\",\"G\":\"G\",\"H\":\"H\",\"I\":\"I\",\"L\":\"L\",\"K\":\"K\",\"F\":\"F\",\"P\":\"P\",\"S\":\"S\",\"T\":\"T\",\"W\":\"W\",\"Y\":\"Y\",\"V\":\"V\",\"M\":\"M\"}\ndef prot_p(strand,p1,p2):\n    if strand==\"+\": nt=seq[p1-1:p2]\n    else: nt=revcomp(seq[p1-1:p2])\n    aa=\"\".join(table[nt[i:i+3]] for i in range(0,len(nt)-2,3))\n    return aa[:-1]  # drop stop\n\ngenes={ \"g1(-)\":(\"-\",665,1951), \"g2(-)\":(\"-\",2068,2724), \"g3(-)\":(\"-\",2395,3000),\n        \"g4(+)\":(\"+\",1996,2517), \"g5(+)\":(\"+\",1292,1774), \"g6(+)\":(\"+\",2689,2922)}\nfor name,(st,p1,p2) in genes.items():\n    aa=prot_p(st,p1,p2)\n    print(\"== %s %d-%d  %d aa\"%(name,p1,p2,len(aa)))\n    print(aa)\n    print()\n\n# RBS search: AGGAGG/AGGAG/GGAG within 4-12 nt upstream of start codon (correct orientation)\nprint(\"RBS scan:\")\nfor name,(st,p1,p2) in genes.items():\n    win = seq[max(0,p1-1-14):p1-1] if st==\"+\" else revcomp(seq[p2:p2+14])\n    hits=[]\n    for m in range(len(win)-4):\n        w=win[m:m+5]\n        if w in (\"AGGAG\",\"GGAGG\",\"AGGAT\"): hits.append((m,w))\n    print(\"  %s upstream(%s..%s): %s  -> %s\"%(name, p1-14, p1-1, win, hits if hits else \"none\"))\n\n# codon-position nucleotide composition inside genes (3-periodicity check)\nfrom collections import Counter\nprint(\"\\nNucleotide usage by codon position (all 6 genes pooled):\")\ncs=[Counter(),Counter(),Counter()]\ntot=0\nfor name,(st,p1,p2) in genes.items():\n    nt=seq[p1-1:p2] if st==\"+\" else revcomp(seq[p1-1:p2])\n    for i in range(0,len(nt)-2,3):\n        for k in range(3):\n            if i+k < len(nt)-3 or (i+k<len(nt)-3 and True):\n                cs[k][nt[i+k]]+=1\nfor k in range(3):\n    tot=sum(cs[k].values())\n    print(\"  pos%d: %s\"%(k+1,\"  \".join(\"%s=%.3f\"%(n,cs[k][n]/tot) for n in \"ATCG\")))\n\n# GC skew per gene: (G3 - C3)/(G3+C3) of 3rd codon positions\nprint(\"\\nPer-gene 3rd-position GC skew and gene strand:\")\nfor name,(st,p1,p2) in genes.items():\n    nt=seq[p1-1:p2] if st==\"+\" else revcomp(seq[p1-1:p2])\n    c3=Counter(nt[2] for i in range(0,len(nt)-2,3) if nt[i+2:i+3])\n    g=c3.get(\"G\",0); c=c3.get(\"C\",0)\n    print(\"  %s strand %s G3=%d C3=%d GC3skew=%+.3f (w=size %d)\"%(name,st,g,c,(g-c)/(g+c) if g+c else 0,p2-p1+1))\n"
+      },
+      "is_error": false,
+      "output_chars": 2324,
+      "nt_run": 0
+    },
+    {
+      "turn": 5,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\"))\nL=len(seq)\ndef revcomp(s): return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\nfrom collections import Counter\n\ngenes={ \"g1(-)\":(\"-\",665,1951), \"g2(-)\":(\"-\",2068,2724), \"g3(-)\":(\"-\",1,606),\n        \"g4(+)\":(\"+\",1996,2517), \"g5(+)\":(\"+\",1292,1774), \"g6(+)\":(\"+\",2689,2922)}\n\n# per-gene codon position composition, fixed\nprint(\"Per-gene nucleotide composition by codon position:\")\nfor name,(st,p1,p2) in sorted(genes.items()):\n    nt=seq[p1-1:p2] if st==\"+\" else revcomp(seq[p1-1:p2])\n    c=[Counter(),Counter(),Counter()]\n    for i in range(0,len(nt)-2,3):\n        for k in range(3):\n            if i+k < len(nt)-3: c[k][nt[i+k]]+=1\n    out=[]\n    for k in range(3):\n        t=sum(c[k].values())\n        out.append(\"p%d %s\"%(k+1,\" \".join(\"%s%.2f\"%(n,c[k][n]/t) for n in \"ATCG\")))\n    print(\"  %s: %s\"%(\" | \".join(out)))\n\n# intergenic composition (regions not inside any gene)\ngmask=[i for i,_ in genes.items()]\ncovered=set()\nfor name,(st,p1,p2) in genes.items(): covered |= set(range(p1-1,p2))\ninter=[\"\",\"\"]\ninC=False\nig=\"\"\nfor i,c in enumerate(seq):\n    if i in covered: continue\n    ig+=c\nprint(\"\\nIntergenic length:\",len(ig))\nif len(ig)>100:\n    c=Counter(ig); t=c.total()\n    f1={n:c[n]/t for n in \"ACGT\"}\n    di=Counter(ig[i:i+2] for i in range(len(ig)-1))\n    for n in [\"AA\",\"AT\",\"AC\",\"AG\",\"CA\",\"CC\",\"CG\",\"CT\",\"GA\",\"GC\",\"GG\",\"GT\",\"TA\",\"TT\",\"TC\",\"TG\"]:\n        print(\"   %s OR=%.2f\"%(n, di[n]/(len(ig)-1)/(f1[n[0]]*f1[n[1]])))\n    print(\"   GC%%: %.1f\"%(100*(f1['G']+f1['C'])))\n\n# synonymous-codon uniformity test inside genes (pooled): compare codon freq\ncodons_set_all=set()\npool=Counter()\nfor name,(st,p1,p2) in genes.items():\n    nt=seq[p1-1:p2] if st==\"+\" else revcomp(seq[p1-1:p2])\n    nt=nt[:len(nt)-len(nt)%3-3] if nt[-3:] in (\"TAA\",\"TAG\",\"TGA\") else nt[:len(nt)//3*3]\n    for i in range(0,len(nt),3):\n        pool[nt[i:i+3]]+=1\nprint(\"\\nPooled codon counts (complete genes g1,g2,g4,g5,g6):\")\ncodes_1={}\nbases=\"TCAG\"; aas1=\"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRR IIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\".replace(\" \",\"\")\nj=0\noneA={\"A\":\"R\",\"R\":\"?\",\"N\":\"N\",\"D\":\"D\",\"C\":\"C\",\"Q\":\"Q\",\"E\":\"E\",\"G\":\"G\",\"H\":\"H\",\"I\":\"I\",\"L\":\"L\",\"K\":\"K\",\"F\":\"F\",\"P\":\"P\",\"S\":\"S\",\"T\":\"T\",\"W\":\"W\",\"Y\":\"Y\",\"V\":\"V\",\"M\":\"M\",\"*\":\"*\"}\nfor b1 in bases:\n    for b2 in bases:\n        for b3 in bases:\n            codes_1[b1+b2+b3]=aas1[j]; j+=1\nbyAA={}\nfor c,n in codes_1.items(): byAA.setdefault(n,[]).append(c)\ntot=sum(pool[c] for c in pool if c not in (\"TAA\",\"TAG\",\"TGA\"))\nprint(\"  total:\",tot)\n# chi2-like: for each >1-codon family, deviations from uniform\nfrom math import sqrt\nprint(\"  Synonymous codon distribution (observed vs uniform-within-family):\")\nfor aa in sorted(byAA):\n    fam=byAA[aa]\n    obs=[pool[c] for c in fam]\n    lo=sum(obs)\n    if lo<20: \n        continue\n    exp=lo/len(fam)\n    chi=sum((o-exp)**2/exp for o in obs)/ (len(fam)-1)\n    print(\"   %-3s n=%3d obs=%s  chi/n = %.2f\"%(aa,lo,obs,chi))\n# Overall codon freq sorted\ndef pct(x): return \"%.3f\"%(x/tot)\nprint(\"\\n  Codon GC3-content overall: G3+C3 = %.2f\"%(\n      sum(pool[c] for c in pool if c[2] in \"GC\")/tot))\n"
+      },
+      "is_error": false,
+      "output_chars": 186,
+      "nt_run": 0
+    },
+    {
+      "turn": 6,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\"))\nL=len(seq)\ndef revcomp(s): return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\nfrom collections import Counter\n\ngenes={ \"g1(-)\":(\"-\",665,1951), \"g2(-)\":(\"-\",2068,2724), \"g3(-)\":(\"-\",1,606),\n        \"g4(+)\":(\"+\",1996,2517), \"g5(+)\":(\"+\",1292,1774), \"g6(+)\":(\"+\",2689,2922)}\n\nprint(\"Codon-position composition per gene:\")\nfor name,(st,p1,p2) in sorted(genes.items()):\n    nt=seq[p1-1:p2] if st==\"+\" else revcomp(seq[p1-1:p2])\n    c=[Counter(),Counter(),Counter()]\n    for i in range(0,len(nt)-2,3):\n        for k in range(3):\n            if i+k < len(nt)-3: c[k][nt[i+k]]+=1\n    row=[]\n    for k in range(3):\n        t=sum(c[k].values())\n        row.append(\"pos{} \"+\" \".join(\"{}{:0.2f}\".format(n,c[k][n]/t) for n in \"ATCG\"))\n    print(\"  %s:\"%name), \"; \".join(row)\n    print(\"      \"+ \"  \".join(row[k % 5] if False else \"\" for k in [0]) + \"  |\")\n    # simpler\n    parts=[]\n    for k in range(3):\n        t=sum(c[k].values())\n        parts.append(\"p%d \"+\"A\".format(k+1))  # discard\n    # print plainly\n    s=\"\"\n    for k in range(3):\n        t=sum(c[k].values())\n        s+=\" p%d:\"%(k+1) + \",\".join(\"%s%.2f\"%(n,c[k][n]/t) for n in \"ATCG\")\n    print(\"   \",s.strip())\n\ncovered=set()\nfor name,(st,p1,p2) in genes.items(): covered |= set(range(p1-1,p2))\nig=\"\".join(c for i,c in enumerate(seq) if i not in covered)\nprint(\"\\nIntergenic length:\",len(ig)) if False else None\nc=Counter(ig); t=c.total()\nf1={n:c[n]/t for n in \"ACGT\"}\ndi=Counter(ig[i:i+2] for i in range(len(ig)-1))\nprint(\"Intergenic GC%%: %.1f\"%(100*(f1['G']+f1['C'])))\nprint(\"Intergenic dinucleotide odds ratios:\")\nfor n in [\"AA\",\"AT\",\"AC\",\"AG\",\"CA\",\"CC\",\"CG\",\"CT\",\"GA\",\"GC\",\"GG\",\"GT\",\"TA\",\"TT\",\"TC\",\"TG\"]:\n    print(\"  %s: %.2f\"%(n, di[n]/(len(ig)-1)/(f1[n[0]]*f1[n[1]])))\nprint(\"Intergenic monomer:\", {n:round(f1[n],3) for n in \"ATCG\"})\n"
+      },
+      "is_error": false,
+      "output_chars": 960,
+      "nt_run": 0
+    },
+    {
+      "turn": 7,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\"))\nL=len(seq)\nfrom collections import Counter\nimport re\n\n# 1) locate enriched hexamers\nfor h in [\"CGCCAG\",\"CTTCTT\",\"TTCTTC\",\"CTGCTT\",\"GCCAGA\",\"CCAGAA\"]:\n    pos=[m.start()+1 for m in re.finditer(h,seq)]\n    print(h, \"->\", pos)\n\n# 2) promoter-ish motifs\nprint(\"\\nTATAT / TATAAT occurrences:\", [(m.start()+1, seq[max(0,m.start()-10):m.start()+16]) for m in re.finditer(\"TATAT\",seq)])\nprint(\"TTGACA:\", [m.start()+1 for m in re.finditer(\"TTGACA\",seq)])\nprint(\"TATAAT:\", [m.start()+1 for m in re.finditer(\"TATAAT\",seq)])\nprint(\"AGGAGG:\", [m.start()+1 for m in re.finditer(\"AGGAGG\",seq)])\nprint(\"AGGAG :\", [m.start()+1 for m in re.finditer(\"AGGAG\",seq)])\n\n# 3) inverted repeats (stem>=9, loop 0-10) = rho-independent terminator-like\n# simple search: find palindromic sequence s[i:j] such that reverse-complement matches an adjacent segment\ndef revcomp(s): return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\nL_loop_max=12\nhits=[]\nfor i in range(L-30):\n    for stem in (12,11,10,9):\n        arm=seq[i:i+stem]\n        rc=revcomp(arm)\n        j=seq.find(rc, i+stem+L_loop_max, i+stem+L_loop_max+L_loop_max+20)\n        if j!=-1:\n            hits.append((i+1, stem, j-i-stem))\n            break\nhits=hits[:40]\nprint(\"\\nInverted repeats (start pos, stem len, loop) [ineligible list truncated]:\")\nfor h in hits[:15]: print(\"   \", h)\n\n# 4) windowed GC content (500bp steps, 250 step)\nprint(\"\\nGC% by 500-bp window:\")\nfor i in range(0,L-250,250):\n    w=seq[i:i+500]\n    gc=(w.count(\"G\")+w.count(\"C\"))/min(500,L-i)*100\n    print(\"   %d-%d: %.1f\"%(i+1,min(i+500,L),gc))\n\n# 5) A+T% local minima, and poly-runs\nprint(\"\\nLongest A-run, T-run, and overall scores of homopolymers:\")\nfor n in \"ACGT\":\n    runs=re.findall(n+\"+\",seq)\n    print(\"  %s: longest run %d\"%(n,max(len(r) for r in runs)))\n\n# 6) exact 20-mer repeats\nkm=Counter(seq[i:i+20] for i in range(L-19))\nprint(\"\\nrepeated 20-mers:\", [ (k,v) for k,v in km.items() if v>1][:10])\nkm12=Counter(seq[i:i+12] for i in range(L-11))\nprint(\"repeated 12-mers:\", [(k,v) for k,v in km12.items() if v>1][:10])\nkm10=Counter(seq[i:i+10] for i in range(L-9))\nprint(\"repeated 10-mers:\", [(k,v) for k,v in km10.items() if v>1][:15])\n"
+      },
+      "is_error": false,
+      "output_chars": 1192,
+      "nt_run": 26
+    },
+    {
+      "turn": 8,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\"))\nL=len(seq)\ndef revcomp(s): return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\nbases=\"TCAG\"; aas=\"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\ntable={}; j=0\nfor b1 in bases:\n    for b2 in bases:\n        for b3 in bases: table[b1+b2+b3]=aas[j]; j+=1\n\ngenes={ \"g1(-)\":(\"-\",665,1951), \"g2(-)\":(\"-\",2068,2724), \"g3(-)\":(\"-\",1,606),\n        \"g4(+)\":(\"+\",1996,2517), \"g5(+)\":(\"+\",1292,1774), \"g6(+)\":(\"+\",2689,2922)}\ndef getnt(name):\n    st,p1,p2=genes[name]\n    nt=seq[p1-1:p2] if st==\"+\" else revcomp(seq[p1-1:p2])\n    if nt[-3:] in (\"TAA\",\"TAG\",\"TGA\"): nt=nt[:-3]\n    return nt\nnames=list(genes)\nusage={}\nfor n in names:\n    nt=getnt(n)\n    u=Counter(nt[i:i+3] for i in range(0,len(nt),3))\n    usage[n]=u\n\n# Pearson correlation of codon usage between gene pairs (64-codon vectors)\ndef corr(a,b):\n    xs=[usage[a].get(c,0) for c in table]\n    ys=[usage[b].get(c,0) for c in table]\n    mx=sum(xs)/len(xs); my=sum(ys)/len(ys)\n    sxx=sum((x-mx)**2 for x in xs); syy=sum((y-my)**2 for y in ys)\n    sxy=sum((x-mx)*(y-my) for x,y in zip(xs,ys))\n    return sxy/((sxx*syy)**0.5)\nprint(\"Codon-usage correlation between genes:\")\nfor i in range(len(names)):\n    print(\"  \"+\"  \".join(\"%+.2f\"%corr(names[i],names[j]) for j in range(len(names)))+\"   (%s first)\"%names[i])\nprint(\"   order:\", names)\n\n# Arg / Leu / Lys / Ile etc family preferences pooled\npool=Counter()\nfor n in names: pool.update(usage[n])\ndef show(aa, fams):\n    t=sum(pool[c] for c in fams)\n    print(\"  %-4s n=%3d  %s\"%(aa,t,\" \".join(\"%s:%.0f%%\"%(c,100*pool[c]/t) for c in fams)))\nprint(\"\\nFamily preferences (pooled among 5-6 genes):\")\nshow(\"Arg\", [\"CGT\",\"CGC\",\"CGA\",\"CGG\",\"AGA\",\"AGG\"])\nshow(\"Leu\", [\"TTA\",\"TTG\",\"CTT\",\"CTC\",\"CTA\",\"CTG\"])\nshow(\"Ile\", [\"ATT\",\"ATC\",\"ATA\"])\nshow(\"Lys\", [\"AAA\",\"AAG\"])\nshow(\"Ser\", [\"TCT\",\"TCC\",\"TCA\",\"TCG\",\"AGT\",\"AGC\"])\nshow(\"Ala\", [\"GCT\",\"GCC\",\"GCA\",\"GCG\"])\nshow(\"Gly\", [\"GGT\",\"GGC\",\"GGA\",\"GGG\"])\nshow(\"Pro\", [\"CCT\",\"CCC\",\"CCA\",\"CCG\"])\n\n# transmembrane: 19-aa windows hydrophobic fraction\nprint(\"\\nHighly hydrophobic 19-aa windows (hydropathy>=0.7, potential TM helices):\")\nfor n in names:\n    nt=getnt()\n    aa=\"\".join(table[nt[i:i+3]] for i in range(0,len(nt),3))\n    hyd=set(\"VILMFYW\")\n    for i in range(len(aa)-19):\n        f=sum(ch in hyd for ch in aa[i:i+19])/19\n        if f>=0.8:\n            print(\"   %s +%d..%d  %s\"%(n,i+1,i+19,aa[i:i+19]))\n"
+      },
+      "is_error": false,
+      "output_chars": 126,
+      "nt_run": 0
+    },
+    {
+      "turn": 9,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\"))\ndef revcomp(s): return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\nfrom collections import Counter\ngenes={ \"g1(-)\":(\"-\",665,1951), \"g2(-)\":(\"-\",2068,2724), \"g3(-)\":(\"-\",1,606),\n        \"g4(+)\":(\"+\",1996,2517), \"g5(+)\":(\"+\",1292,1774), \"g6(+)\":(\"+\",2689,2922)}\ndef getnt(name):\n    st,p1,p2=genes[name]\n    nt=seq[p1-1:p2] if st==\"+\" else revcomp(seq[p1-1:p2])\n    if nt[-3:] in (\"TAA\",\"TAG\",\"TGA\"): nt=nt[:-3]\n    return nt\nnames=list(genes)\nusage={n:Counter(getnt(n)[i:i+3] for i in range(0,len(getnt(n)),3)) for n in names}\ndef corr(a,b):\n    xs=[usage[a].get(c,0) for c in usage]  # placeholder\n    return None\n# proper 64-codon vector\nallc=[b1+b2+b3 for b1 in \"TCAG\" for b2 in \"TCAG\" for b3 in \"TCAG\"]\ndef vec(a): return [usage[a].get(c,0) for c in allc]\nimport math\ndef corr2(a,b):\n    x,y=vec(a),vec(b)\n    mx=sum(x)/64; my=sum(y)/64\n    sxx=sum((v-mx)**2 for v in x); syy=sum((v-my)**2 for v in y)\n    sxy=sum((p-mx)*(q-my) for p,q in zip(x,y))\n    return sxy/ (sxx*syy)**0.5 if sxx*syy else 0\nprint(\"Codon-usage Pearson correlations (rows=gene):\")\nprint(\"       \"+\" \".join(\"%6s\"%n for n in names))\nfor a in names:\n    print(\"%6s \"%a + \" \".join(\"%6.2f\"%corr2(a,b) for b in names))\n\npool=Counter()\nfor n in names: pool.update(usage[n])\ndef show(aa, fams):\n    t=sum(pool[c] for c in fams)\n    print(\"  %-4s n=%3d  %s\"%(aa,t,\" \".join(\"%s:%.0f%%\"%(c,100*pool[c]/t) for c in fams)))\nprint(\"\\nCodon family preferences:\")\nshow(\"Arg\", [\"CGT\",\"CGC\",\"CGA\",\"CGG\",\"AGA\",\"AGG\"])\nshow(\"Leu\", [\"TTA\",\"TTG\",\"CTT\",\"CTC\",\"CTA\",\"CTG\"])\nshow(\"Ile\", [\"ATT\",\"ATC\",\"ATA\"])\nshow(\"Lys\", [\"AAA\",\"AAG\"])\nshow(\"Ser\", [\"TCT\",\"TCC\",\"TCA\",\"TCG\",\"AGT\",\"AGC\"])\nshow(\"Ala\", [\"GCT\",\"GCC\",\"GCA\",\"GCG\"])\nshow(\"Gly\", [\"GGT\",\"GGC\",\"GGA\",\"GGG\"])\n\nprint(\"\\nHighly hydrophobic 19-aa windows (>=80% VILMFYW): any TM helices?\")\nhyd=set(\"VILMFYW\")\nfor n in names:\n    nt=getnt(n)\n    aa=\"\".join(table[nt[i:i+3]] for i in range(0,len(nt),3))\n    best=0; posn=None\n    for i in range(len(aa)-19):\n        f=sum(ch in hyd for ch in aa[i:i+19])/19\n        if f>best: best=f; posn=i\n    print(\"   %s: max hydrophobic frac in 19aa window = %.2f aa%d..%d\"%(n,best,posn+1,posn+19))\n\n# Basic-rich stretches (DNA-binding?)\nprint(\"\\nBasic clusters (>=6 K/R in 12 aa):\")\nfor n in names:\n    nt=getnt(n)\n    aa=\"\".join(table[nt[i:i+3]] for i in range(0,len(nt),3))\n    for i in range(len(aa)-12):\n        b=sum(ch in \"KR\" for ch in aa[i:i+12])\n        if b>=6: print(\"   %s +%d: %s\"%(n,i+1,aa[i:i+12]))\n    break\n"
+      },
+      "is_error": false,
+      "output_chars": 1011,
+      "nt_run": 0
+    },
+    {
+      "turn": 10,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\"))\ndef revcomp(s): return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\nfrom collections import Counter\nbases=\"TCAG\"; aas=\"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\ntable={}; j=0\nfor b1 in bases:\n    for b2 in bases:\n        for b3 in bases: table[b1+b2+b3]=aas[j]; j+=1\ngenes={ \"g1(-)\":(\"-\",665,1951), \"g2(-)\":(\"-\",2068,2724), \"g3(-)\":(\"-\",1,606),\n        \"g4(+)\":(\"+\",1996,2517), \"g5(+)\":(\"+\",1292,1774), \"g6(+)\":(\"+\",2689,2922)}\ndef getnt(name):\n    st,p1,p2=genes[name]\n    nt=seq[p1-1:p2] if st==\"+\" else revcomp(seq[p1-1:p2])\n    if nt[-3:] in (\"TAA\",\"TAG\",\"TGA\"): nt=nt[:-3]\n    return nt\nhyd=set(\"VILMFYW\")\nfor n in genes:\n    nt=getnt(n)\n    aa=\"\".join(table[nt[i:i+3]] for i in range(0,len(nt),3))\n    c=Counter(aa); t=len(aa)\n    best=0\n    for i in range(len(aa)-19):\n        f=sum(ch in hyd for ch in aa[i:i+19])/19\n        best=max(best,f)\n    cys=c.get(\"C\",0); trp=c.get(\"W\",0)\n    basic=sum(c.get(x,0) for x in \"KR\"); acid=sum(c.get(x,0) for x in \"DE\")\n    print(\"%s %d aa: Cys %.1f%% Trp %.1f%% (hypo %, charged %.1f%%, best 19aa hydropathy %.2f)%s\"%(\n        n,t,100*cys/t,100*trp/t, \"\", 100*(basic+acid)/t, best, \" <-- TM-like\" if best>=0.95 else \"\"))\n"
+      },
+      "is_error": false,
+      "output_chars": 149,
+      "nt_run": 0
+    },
+    {
+      "turn": 11,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\"))\ndef revcomp(s): return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\nfrom collections import Counter\nbases=\"TCAG\"; aas=\"FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG\"\ntable={}; j=0\nfor b1 in bases:\n    for b2 in bases:\n        for b3 in bases: table[b1+b2+b3]=aas[j]; j+=1\ngenes={ \"g1(-)\":(\"-\",665,1951), \"g2(-)\":(\"-\",2068,2724), \"g3(-)\":(\"-\",1,606),\n        \"g4(+)\":(\"+\",1996,2517), \"g5(+)\":(\"+\",1292,1774), \"g6(+)\":(\"+\",2689,2922)}\ndef getnt(name):\n    st,p1,p2=genes[name]\n    nt=seq[p1-1:p2] if st==\"+\" else revcomp(seq[p1-1:p2])\n    if nt[-3:] in (\"TAA\",\"TAG\",\"TGA\"): nt=nt[:-3]\n    return nt\nhyd=set(\"VILMFYW\")\nspA=0\nfor n in genes:\n    nt=getnt(n)\n    aa=\"\".join(table[nt[i:i+3]] for i in range(0,len(nt),3))\n    c=Counter(aa); t=len(aa)\n    best=0\n    for i in range(len(aa)-19):\n        f=sum(ch in hyd for ch in aa[i:i+19])/19\n        best=max(best,f)\n    cys=100*c.get(\"C\",0)/t; trp=100*c.get(\"W\",0)/t\n    basic=sum(c.get(x,0) for x in \"KR\"); acid=sum(c.get(x,0) for x in \"DE\")\n    charged=100*(basic+acid)/t\n    print(\"{} ({}) {}: {:.2f} kDa est, Cys {:.1f}% Trp {:.1f}% charged {:.1f}%  max19aa-hydropathy {:.2f} {}\".format(\n        n, str(genes[n]), t, 0.11*t, cys, trp, charged, best, \"TM-like\" if best>=0.95 else \"\"))\n    print(\"   N10:\", aa[:10], \" C10:\", aa[-10:])\n# stops density in 3000 bp vs random expectation (5 files)\nprint()\nimport math\n# count of stop codons in all 6 frames on both strands relative to random matched comp\ndef scan_stops(s):\n    n=0\n    for strand,ss in ((\"+\",s),(\"-\",revcomp(s))):\n        for f in range(3):\n            prev=None\n            while f+3<=len(ss):\n                if ss[f:f+3] in (\"TAA\",\"TAG\",\"TGA\"): n+=1\n                f+=3\n    return n\nstops_obs=scan_stops(seq)\npstop=None\ncomp=Counter(seq); \n# expected per-frame stops from composition: for each strand/frame, ~ (#codons) * sum(P(stop codon))\npt=comp['T']/L; pa=comp['A']/L; pg=comp['G']/L; pc=comp['C']/L\nframes=6\nncod=sum(len(seq)//3 for _ in range(frames))\nexp=ncod*(pt*pa*pa+pt*pa*pg+pt*pg*pa)\nprint(\"stop codons: observed in all frames/strands =\", stops_obs, \" expected if random composition:\", round(exp,1))\n"
+      },
+      "is_error": false,
+      "output_chars": 954,
+      "nt_run": 0
+    },
+    {
+      "turn": 12,
+      "name": "run_python",
+      "input": {
+        "code": "seq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\"))\nL=len(seq)\ndef revcomp(s): return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\nfrom collections import Counter\nn=0\nfor ss in (seq, revcomp(seq)):\n    p=(len(ss))//3*3\n    for f in range(3):\n        for i in range(f,p-2,3):\n            if ss[i:i+3] in (\"TAA\",\"TAG\",\"TGA\"): n+=1\ncomp=Counter(seq)\npa=comp['A']/L; pt=comp['T']/L; pg=comp['G']/L; pc=comp['C']/L\ncodons=6*(L//3)\nexp=codons*(pt*pa*pa + pt*pa*pg + pt*pg*pa)\nimport statistics, random\nrandom.seed(1)\npop=\"\".join(k*comp[k] for k in \"ACGT\")\nnull=[]\nfor _ in range(300):\n    s2=\"\".join(random.sample(pop,L))\n    m=0\n    for ss in (s2,revcomp(s2)):\n        for f in range(3):\n            for i in range(f,L-2,3):\n                if ss[i:i+3] in (\"TAA\",\"TAG\",\"TGA\"): m+=1\n    null.append(m)\nnull.sort()\nprint(\"Stop codons, all 6 frames / both strands: observed =\", n)\nprint(\"  analytical expectation at this composition =\", round(exp,1))\nprint(\"  permutation null: median\", statistics.median(null), \" 5th pct\", null[15], \" 95th pct\", null[285])\n"
+      },
+      "is_error": false,
+      "output_chars": 170,
+      "nt_run": 0
+    }
+  ],
+  "turns": [
+    {
+      "input_tokens": 2055,
+      "output_tokens": 423,
+      "cached_tokens": 0,
+      "tool_calls": 2,
+      "seconds": 7.7
+    },
+    {
+      "input_tokens": 3863,
+      "output_tokens": 3232,
+      "cached_tokens": 384,
+      "tool_calls": 2,
+      "seconds": 55.7
+    },
+    {
+      "input_tokens": 6024,
+      "output_tokens": 967,
+      "cached_tokens": 2048,
+      "tool_calls": 1,
+      "seconds": 14.2
+    },
+    {
+      "input_tokens": 6864,
+      "output_tokens": 1312,
+      "cached_tokens": 4480,
+      "tool_calls": 1,
+      "seconds": 19.1
+    },
+    {
+      "input_tokens": 8896,
+      "output_tokens": 3662,
+      "cached_tokens": 6016,
+      "tool_calls": 1,
+      "seconds": 70.1
+    },
+    {
+      "input_tokens": 15723,
+      "output_tokens": 4667,
+      "cached_tokens": 0,
+      "tool_calls": 1,
+      "seconds": 110.1
+    },
+    {
+      "input_tokens": 20438,
+      "output_tokens": 701,
+      "cached_tokens": 12160,
+      "tool_calls": 1,
+      "seconds": 9.6
+    },
+    {
+      "input_tokens": 21715,
+      "output_tokens": 3453,
+      "cached_tokens": 17024,
+      "tool_calls": 1,
+      "seconds": 74.9
+    },
+    {
+      "input_tokens": 25806,
+      "output_tokens": 3912,
+      "cached_tokens": 17024,
+      "tool_calls": 1,
+      "seconds": 129.5
+    },
+    {
+      "input_tokens": 29758,
+      "output_tokens": 994,
+      "cached_tokens": 21888,
+      "tool_calls": 1,
+      "seconds": 13.5
+    },
+    {
+      "input_tokens": 31301,
+      "output_tokens": 1910,
+      "cached_tokens": 26752,
+      "tool_calls": 1,
+      "seconds": 33.8
+    },
+    {
+      "input_tokens": 33258,
+      "output_tokens": 826,
+      "cached_tokens": 26752,
+      "tool_calls": 1,
+      "seconds": 10.5
+    },
+    {
+      "input_tokens": 34600,
+      "output_tokens": 846,
+      "cached_tokens": 29184,
+      "tool_calls": 1,
+      "seconds": 17.5
+    },
+    {
+      "input_tokens": 35507,
+      "output_tokens": 3316,
+      "cached_tokens": 31616,
+      "tool_calls": 0,
+      "seconds": 94.8
+    }
+  ],
+  "request_ids": [
+    "chatcmpl-aqPuS5WEQbGbAa1b7wB7tkMeHdMCw",
+    "chatcmpl-bwjbv1PSBmTQXIlkgnqgpsfvZ8wEG",
+    "chatcmpl-ev5DvCRDWsNCDoVS5hKE6HbwziKYW",
+    "chatcmpl-9ZsnzVa30K3JxH3H6TF5V5SeisMko",
+    "chatcmpl-hD7HH34CB5vVRq2aeUd1v4oCWwMH9",
+    "chatcmpl-Rqft4w5LM88xgfxVyhznWJfi",
+    "chatcmpl-Ra12bjGPhHqyA80YLZelnesm",
+    "chatcmpl-R0vcUHtGCa2tjxK9wuyNHVwY",
+    "chatcmpl-RtzpWznWeVspvzThJ4TIr9Eg",
+    "chatcmpl-RC4YCbV9WwlrEcKz2XhvC6I7",
+    "chatcmpl-Rc93V68myb8uo0qrbBilVHWo",
+    "chatcmpl-RZxU1OhM1eF5N9NZieyzmfvo",
+    "chatcmpl-RYzV4E1VKUW2qAYPat3mhzY2",
+    "chatcmpl-RLR1Ma9fYKMjBI965xBt3d1c"
+  ],
+  "served_models": [
+    "glm-5.3-flash"
+  ],
+  "input_tokens": 275808,
+  "output_tokens": 30221,
+  "cached_tokens": 195328,
+  "status": "end_turn",
+  "forced_report": false,
+  "refusal_category": null,
+  "report": "All the evidence I need has been gathered. Here is the report.\n\n---\n\n## Report on `region.fasta` (`region_001`)\n\n**Seq length:** exactly 3,000 bp \u00b7 **GC content:** 50.9% (A 24.2%, T 24.9%, C 26.7%, G 24.2%) \u00b7 Composition is unusually even for natural DNA (A and G are both exactly 725 counts; C/G imbalance is small).\n\n### Conclusion in one line\n**The region is almost certainly a protein-coding locus \u2014 gene-dense, with six long ORFs on both strands, two of which occur as opposite-strand overlapping (nested) gene pairs.**\n\n### Feature table (1-based coordinates)\n\n| # | Coordinates | Strand | Length / size | Notes |\n|---|---|---|---|---|\n| **G1** | **665\u20131951** | **\u2013** | 1,287 nt / **428 aa (~47 kDa)** | ATG\u2192TAA. Largest ORF; complete. |\n| **G3p** | 1\u2013606 | \u2013 | 606 nt / \u2265201 aa | ATG at pos 606, **no stop codon** \u2014 runs off the *left* edge; only the 3\u2032 portion is present in this fragment. |\n| **G5** | 1292\u20131774 | + | 483 nt / 160 aa (~18 kDa) | ATG\u2192stop. |\n| **G4** | 1996\u20132517 | + | 522 nt / 173 aa (~19 kDa) | ATG\u2192stop. |\n| **G2** | 2068\u20132724 | \u2013 | 657 nt / 218 aa (~24 kDa) | ATG\u2192stop. |\n| **G6** | 2689\u20132922 | + | 234 nt / 77 aa (~8 kDa) | ATG\u2192stop. |\n| Intergenic gaps | 607\u2013664, 1952\u20131995, 2923\u20133000 | \u2014 | 58 + 44 + 78 bp | Only ~180 bp total non-ORF sequence. |\n\n**Notable structural feature \u2014 overlapping opposite-strand gene pairs:**\n- **G5 (1292\u20131774, +) lies completely nested inside G1 (665\u20131951, \u2013)**, on the opposite strand, for a 483-nt overlap.\n- **G4 (1996\u20132517, +) overlaps G2 (2068\u20132724, \u2013) for ~450 nt** on the opposite strand.\n- Only ~180 bp of the whole 3,000 bp is non-coding: coding potential \u2248 1,260 nt/kb \u2014 extremely compact, characteristic of phage/viral genomes rather than ordinary bacterial chromosomal fragments.\n\n### Statistical evidence that these are real genes (not ORF noise)\n1. **Longest-ORF test:** in 500 random permutations nucleotides matched for the exact composition of this sequence, the median longest ORF is ~300 nt, the 95th percentile is 465 nt and the maximum ever seen is 705 nt. **The observed 1,287-nt ORF was matched 0/500 times (p < 0.002).**\n2. **Stop-codon suppression:** total stop-codon count in all 6 frames/strands is 218, versus a permutation median of 273 (5th\u201395th pct: 253\u2013295) \u2014 stops are strongly avoided, as expected in a coding region.\n3. **Clean codon-position periodicity in all six ORFs:** position-2 is A/T-rich (~0.27\u20130.36 A, 0.28\u20130.36 T) while positions 1 and 3 are G/C-rich \u2014 the classic signature of translated reading frames.\n4. **Biologically plausible codon bias shared between ORFs:** CTG 48% (CTA 0%) for Leu; GCG 40% for Ala; AGC 32% for Ser; GGT/GGC 86% for Gly; CGT/CGC 66% and AGG <1% for Arg; Lys AAA 69% > AAG. This is a coherent, GC2/GC3-biased bacterial-ish codon-usage pattern, and codon-usage spectra of the minus-strand genes correlate with each other (r \u2248 0.5\u20130.7).\n5. **Protein-level plausibility:** no transmembrane-helix-sized hydrophobic stretches (max 19-aa hydropathy 0.53\u20130.58 in every ORF \u2014 soluble proteins), normal Cys (~0\u20134%) and Trp (~0\u20133%) content, and balanced acidic/basic residues \u2014 not the composition you would get from a random peptide.\n\n### Other observations\n- **One regulatory-feeling element:** a **\"TATATA\"-like box at 1953\u20131958**, in the only sizable intergenic gap (1952\u20131995), immediately 5' upstream of G4 (+ strand, starts 1996) and potentially also driving G1 (\u2013 strand, ends 1951). Curiously, this is the **only** TATAT occurrence in the whole 3,000 bp.\n- **Absence of typical prokaryotic translation signals:** no archetype Shine-Dalgarno motif (AGGAGG/AGGAG) 4\u201312 nt upstream of any start codon; no \u201310 (TATAAT) or \u201335 (TTGACA) promoter boxes elsewhere; no rho-independent hairpin/terminator structure (stem \u22659 bp) detected; no exact 20-bp repeated segments; no CRISPR-like repeat/spacer pattern.\n- **GC content is remarkably uniform** across 500-bp sliding windows (48.6\u201354.4%, no boundary or shift), and there is no consistent strand-specific GC-skew in third codon positions.\n- **\"Round\" length:** the fragment is exactly 3,000 bp \u2014 consistent with a designed, curated, or synthetic construct rather than a randomly chopped genomic window.\n\n### Caveats\n- ABLAST/BLASTN and domain search (HMMER/InterProScan) were not available here, so I could not assign identities to the predicted proteins; the descriptions above are based purely on sequence features.\n- Many 77\u2013173-aa \"genes\" in real genomes are best-supported only by expression data, so G4, G5 and G6 are *putative small ORFs*; G1 (428 aa), G2 (218 aa) and the truncated G3 (\u2265201 aa) are statistically the most compelling.\n\n**Bottom line:** `region_001` is not a region of unknown function \u2014 statistically it is a protein-coding island with \u22651 definite gene (665\u20131951, \u2013, 428 aa), at least two other strong genes (2068\u20132724, \u2013; 1996\u20132517, +; 1292\u20131774, +; 2689\u20132922, +), and a truncated gene at coordinates 1\u2013606 (\u2013). It is packed with predicted protein products \u2014 including two opposite-strand, overlapping ORF pairs.",
+  "nt_run_from_tools": 1960,
+  "seen_intervals": [
+    [
+      1,
+      1968
+    ]
+  ],
+  "tool_errors": 0,
+  "seconds": 662.5,
+  "provider": "opencode-go",
+  "rep": 2,
+  "claims": {
+    "features": [
+      {
+        "type": "gene",
+        "start": 665,
+        "end": 1951,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "G1 minus-strand ORF, 428 aa, complete"
+      },
+      {
+        "type": "gene",
+        "start": 1,
+        "end": 606,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "G3p minus-strand truncated ORF, no stop codon"
+      },
+      {
+        "type": "gene",
+        "start": 1292,
+        "end": 1774,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "G5 plus-strand ORF, 160 aa"
+      },
+      {
+        "type": "gene",
+        "start": 1996,
+        "end": 2517,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "G4 plus-strand ORF, 173 aa"
+      },
+      {
+        "type": "gene",
+        "start": 2068,
+        "end": 2724,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "G2 minus-strand ORF, 218 aa"
+      },
+      {
+        "type": "gene",
+        "start": 2689,
+        "end": 2922,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "G6 plus-strand ORF, 77 aa"
+      },
+      {
+        "type": "other",
+        "start": null,
+        "end": null,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "opposite-strand overlap: G5 (1292-1774, +) nested inside G1 (665-1951, -), 483 nt"
+      },
+      {
+        "type": "other",
+        "start": null,
+        "end": null,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "opposite-strand overlap: G4 (1996-2517, +) overlaps G2 (2068-2724, -), ~450 nt"
+      },
+      {
+        "type": "other",
+        "start": 1953,
+        "end": 1958,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "TATATA-like box upstream of G4 and G1"
+      }
+    ],
+    "named_identity": [
+      "region_001",
+      "region.fasta",
+      "G1",
+      "G3p",
+      "G5",
+      "G4",
+      "G2",
+      "G6"
+    ]
+  },
+  "judge_model": "kimi-k2.7-code"
+}

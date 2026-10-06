@@ -1,0 +1,175 @@
+{
+  "locus": "locus_009",
+  "condition": "inline",
+  "model": "deepseek-v4.1-flash",
+  "effort": null,
+  "read_default": 2000,
+  "tool_calls": [
+    {
+      "name": "list_files",
+      "input": {},
+      "is_error": false,
+      "output_chars": 17,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\"\nfor line in open(\"region.fasta\"):\n    line=line.strip()\n    if line.startswith(\">\"):\n        header=line\n        continue\n    seq += line\nprint(header)\nprint(\"length:\", len(seq))\nfrom collections import Counter\nc = Counter(seq)\nprint(c)\ngc = (c['G']+c['C'])/len(seq)\nprint(\"GC content: %.3f\" % gc)\n"
+      },
+      "is_error": false,
+      "output_chars": 92,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\"))\nseq = seq.upper()\nn = len(seq)\n\ndef rc(s):\n    return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\n\n# Find ORFs >= 50 aa in all 6 frames\nstop = set([\"TAA\",\"TAG\",\"TGA\"])\ndef orfs(s, strand):\n    res=[]\n    for f in range(3):\n        i=f\n        start=None\n        for j in range(f, len(s)-2, 3):\n            cod = s[j:j+3]\n            if cod==\"ATG\" and start is None:\n                start=j\n            if cod in stop:\n                if start is not None:\n                    aa=(j-start)//3\n                    if aa>=50:\n                        res.append((start, j+3, aa, strand))\n                start=None\n        if start is not None:\n            aa=(len(s)-start)//3\n            if aa>=50:\n                res.append((start, len(s), aa, strand))\n    return res\n\nallorfs = orfs(seq,'+') \nrcs = rc(seq)\nallorfs += [(n-b, n-a, aa, '-') for (a,b,aa,_) in orfs(rcs,'-')]\nfor o in sorted(allorfs):\n    print(o)\n"
+      },
+      "is_error": false,
+      "output_chars": 62,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\nn=len(seq)\n\n# find homopolymer runs >= 5\nimport re\nprint(\"Homopolymer runs >=5:\")\nfor m in re.finditer(r'(A{5,}|T{5,}|G{5,}|C{5,})', seq):\n    print(m.start()+1, m.group(), len(m.group()))\n\n# simple tandem repeat detection: repeated k-mers\nprint(\"\\nRepeated exact substrings length>=14 (top):\")\nfrom collections import defaultdict\nd=defaultdict(list)\nL=14\nfor i in range(n-L+1):\n    d[seq[i:i+L]].append(i)\nreps=[(k,v) for k,v in d.items() if len(v)>1]\n# merge to non-redundant maximal\nfor k,v in sorted(reps, key=lambda x:-len(x[0])):\n    print(k, [x+1 for x in v])\n"
+      },
+      "is_error": false,
+      "output_chars": 176,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\nn=len(seq)\ndef rc(s): return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\n\n# longest stop-free stretches in each frame (no stop codon), regardless of ATG\nstop=set([\"TAA\",\"TAG\",\"TGA\"])\nfor strand,s in [('+',seq),('-',rc(seq))]:\n    for f in range(3):\n        best=0;bs=be=0;cur=0;start=f\n        i=f\n        while i < len(s)-2:\n            if s[i:i+3] in stop:\n                if cur>best: best=cur;bs=start;be=i\n                start=i+3;cur=0\n            else:\n                cur=(i+3-start)\n            i+=3\n        if cur>best: best=cur;bs=start;be=len(s)\n        # convert length to bp\n        print(strand,\"frame\",f,\"longest stop-free:\",best,\"bp\", \"start(bp)\",bs,\"end\",be)\n"
+      },
+      "is_error": false,
+      "output_chars": 358,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\nn=len(seq)\ndef rc(s): return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\n\n# Approximate tandem repeat scan: for period p in 2..200, find best repeat units using simple repeat finder\n# Use a simple approach: find all maximal repeats (exact) length>=8\nfrom collections import defaultdict\nd=defaultdict(list)\nL=8\nfor i in range(n-L+1):\n    d[seq[i:i+L]].append(i)\nreps=sorted([(k,v) for k,v in d.items() if len(v)>=2], key=lambda x:-len(x[0]))\nprint(\"number of repeated 8-mers:\", len(reps))\nfor k,v in reps[:20]:\n    print(k, v)\n"
+      },
+      "is_error": false,
+      "output_chars": 440,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\nn=len(seq)\n\n# periodicity scan: for each offset p, look for windows with high match rate (tandem repeat indicator)\nimport statistics\nprint(\"Period scan (windows of 3*p length, >=90% identity, p 2..100):\")\nfound=[]\nfor p in range(2,101):\n    w=3*p\n    i=0\n    while i+w<=n:\n        seg=seq[i:i+w]\n        matches=sum(1 for k in range(w-p) if seg[k]==seg[k+p])\n        if matches >= 0.9*(w-p):\n            found.append((i+1,p,round(matches/(w-p),3)))\n            i+=p\n        else:\n            i+=1\nfor f in found[:50]:\n    print(f)\nprint(\"total\", len(found))\n"
+      },
+      "is_error": false,
+      "output_chars": 324,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\nn=len(seq)\ndef rc(s): return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\n\n# Find longest inverted repeat (stem-loop candidate) with stem>=10 and loop small\n# approach: for each i, expand a stem where seq[i-k]==complement(seq[j+k])\ncomp={'A':'T','T':'A','G':'C','C':'G'}\nbest=[]\n# brute-ish: check all pairs with limit\n# We'll scan using a simple method: consider all i<j gap, expand.\n# To limit time, restrict loop size <= 200 and stem <= 100\nfor gap in range(3,201):\n    for i in range(0, n-gap):\n        j=i+gap\n        # expand\n        k=0\n        while i-k-1>=0 and j+k<n and comp[seq[i-k-1]]==seq[j+k]:\n            k+=1\n        if k>=12:\n            best.append((k, i-k+1+1, j+k, seq[i-k:i]+\"...\"+seq[j+1:j+1+k]))\n# pick best\nbest.sort(reverse=True)\nseen=set()\ncnt=0\nfor b in best:\n    key=(b[1],b[2])\n    if key in seen: continue\n    seen.add(key)\n    print(\"stem\",b[0],\"start\",b[1],\"end\",b[2])\n    cnt+=1\n    if cnt>=15: break\n"
+      },
+      "is_error": false,
+      "output_chars": 11,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\nn=len(seq)\nrc = seq.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\nL=12\nfrom collections import defaultdict\nd=defaultdict(list)\nfor i in range(n-L+1):\n    d[rc[i:i+L]].append(i)\nbest=[]\nfor i in range(n-L+1):\n    for j in d.get(seq[i:i+L],[]):\n        # extend\n        k=L\n        while i+k<n and j+k<n and seq[i+k]==rc[j+k]:\n            k+=1\n        best.append((k,i,j))\nbest.sort(reverse=True)\nprint(\"top inverted-repeat stems (stem len, plus-start, rc-start):\")\nseen=set();cnt=0\nfor k,i,j in best:\n    # rc start j corresponds to plus coordinate n-1-j (end) ... report plus coords\n    left=i; right_end=n-1-j\n    if (left,right_end) in seen: continue\n    seen.add((left,right_end))\n    print(\"stem\",k, \"plus coords\", left+1, \"-\", left+k, \"and\", right_end-k+2,\"-\", right_end+1)\n    cnt+=1\n    if cnt>=15: break\n"
+      },
+      "is_error": false,
+      "output_chars": 204,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\nn=len(seq)\ndef rc(s): return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\n\nsites = {\n 'EcoRI':'GAATTC','BamHI':'GGATCC','HindIII':'AAGCTT','NotI':'GCGGCCGC','XhoI':'CTCGAG',\n 'SalI':'GTCGAC','PstI':'CTGCAG','SmaI':'CCCGGG','KpnI':'GGTACC','SacI':'GAGCTC',\n 'NdeI':'CATATG','NcoI':'CCATGG','XbaI':'TCTAGA','SpeI':'ACTAGT','BglII':'AGATCT',\n 'EcoRV':'GATATC','SphI':'GCATGC','NheI':'GCTAGC','MluI':'ACGCGT','ApaI':'GGGCCC',\n 'AscI':'GGCGCGCC','PacI':'TTAATTAA','SwaI':'ATTTAAAT','SbfI':'CCTGCAGG','FseI':'GGCCGGCC',\n}\nfor name,s in sites.items():\n    for m in range(n-len(s)+1):\n        if seq[m:m+len(s)]==s:\n            print(name, s, m+1)\nprint(\"done restriction scan\")\n\n# common motifs\nmotifs = {'TATA_box':'TATAAA','polyA_signal':'AATAAA','Kozak':'GCCACCATGG','RBS_ShineDalgarno':'AGGAGG',\n          'Gquadruplex_core':'GGG','CAAT_box':'CCAAT','GC_box':'GGGCGG','cAMP_CRE':'TGACGTCA','NFkB':'GGGACTTTCC'}\nprint()\nfor name,m in motifs.items():\n    pos=[i+1 for i in range(n-len(m)+1) if seq[i:i+len(m)]==m]\n    if pos:\n        print(name, m, pos[:10])\n"
+      },
+      "is_error": false,
+      "output_chars": 427,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\nn=len(seq)\n# dinucleotide odds ratios\nfrom collections import Counter\ndi=Counter(seq[i:i+2] for i in range(n-1))\nmono=Counter(seq)\ndef orr(a,b):\n    return (di[a+b]*(n-1))/(mono[a]*mono[b]) *1.0\nprint(\"Dinucleotide odds ratios:\")\nfor a in \"ACGT\":\n    row=[]\n    for b in \"ACGT\":\n        row.append(\"%s%s:%.2f\"%(a,b,orr(a,b)))\n    print(\" \".join(row))\n\n# GC skew across windows\nprint(\"\\nGC skew (G-C)/(G+C) per 250bp:\")\nw=250\nfor i in range(0,n,w):\n    s=seq[i:i+w]\n    g=s.count('G');c=s.count('C');t=s.count('T');a=s.count('A')\n    print(i+1, \"-\", i+len(s), \"GC%%=%.2f\"%((g+c)/len(s)), \"GCskew=%.3f\"%((g-c)/(g+c)))\n"
+      },
+      "is_error": false,
+      "output_chars": 591,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\nn=len(seq)\nimport re\n# microsatellites: dinucleotide repeats >= 8 units (>=16bp), tri >= 5\nprint(\"Microsatellites (di>=8, tri>=6, tetra>=5 units):\")\nfor unit_len, minu in [(2,8),(3,6),(4,5),(5,4),(6,4)]:\n    for m in re.finditer(r'((?:(?:[ACGT]{%d})){%d,})'%(unit_len,minu), seq):\n        # verify it's a true tandem of a single unit\n        pass\n# do it manually: find maximal tandem arrays for each period\nfor p in range(2,13):\n    i=0\n    while i+p<=n:\n        # check repeat units\n        u=seq[i:i+p]\n        cnt=1\n        while i+cnt*p+p<=n and seq[i+(cnt)*p:i+(cnt+1)*p]==u:\n            cnt+=1\n        if cnt>= (8 if p==2 else (6 if p==3 else 5 if p==4 else 4)):\n            print(\"period\",p,\"unit\",u,\"copies\",cnt,\"start\",i+1,\"end\",i+cnt*p)\n        i+=1\n\n# polypurine/polypyrimidine tract length\nbest=0;bs=0\ncur=0;start=0\nfor i,ch in enumerate(seq):\n    if ch in \"AG\":\n        if cur==0: start=i\n        cur+=1\n        if cur>best: best=cur;bs=start\n    else:\n        cur=0\nprint(\"\\nlongest polypurine (AG) tract:\", best, \"at\", bs+1, \"-\", bs+best)\nbest=0;bs=0;cur=0;start=0\nfor i,ch in enumerate(seq):\n    if ch in \"CT\":\n        if cur==0: start=i\n        cur+=1\n        if cur>best: best=cur;bs=start\n    else:\n        cur=0\nprint(\"longest polypyrimidine (CT) tract:\", best, \"at\", bs+1,\"-\",bs+best)\n"
+      },
+      "is_error": false,
+      "output_chars": 152,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nimport random\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\nn=len(seq)\ncomp={'A':'T','T':'A','G':'C','C':'G'}\n\ndef longest_repeat_len(s):\n    L=8\n    # binary-ish: find max L with a repeated L-mer via doubling from 8\n    best=0\n    for L in range(8,60):\n        seen={}\n        found=False\n        for i in range(len(s)-L+1):\n            sub=s[i:i+L]\n            if sub in seen:\n                found=True;break\n            seen[sub]=i\n        if found: best=L\n        else: break\n    return best\n\ndef longest_pal(s):\n    best=0\n    n=len(s)\n    for c in range(n):\n        # even\n        k=0\n        while c-k-1>=0 and c+k<n and comp[s[c-k-1]]==s[c+k]:\n            k+=1\n        best=max(best,2*k)\n        # odd\n        k=0\n        while c-k-1>=0 and c+k+1<n and comp[s[c-k-1]]==s[c+k+1]:\n            k+=1\n        best=max(best,2*k+1)\n    return best\n\ndef longest_homop(s):\n    import re\n    return max(len(m.group()) for m in re.finditer(r'(A+|T+|G+|C+)', s))\n\ndef longest_orf(s):\n    stop={\"TAA\",\"TAG\",\"TGA\"}\n    def go(t):\n        b=0\n        for f in range(3):\n            start=None\n            for j in range(f,len(t)-2,3):\n                cod=t[j:j+3]\n                if cod==\"ATG\" and start is None: start=j\n                if cod in stop:\n                    if start is not None: b=max(b,j-start)\n                    start=None\n        return b\n    r=s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\n    return max(go(s),go(r))\n\nprint(\"OBSERVED: longest exact repeat:\", longest_repeat_len(seq), \"longest palindrome:\", longest_pal(seq),\n      \"longest homopolymer:\", longest_homop(seq), \"longest ATG-ORF(bp):\", longest_orf(seq))\n\n# Monte Carlo with same base composition\nrandom.seed(0)\nbases=list(\"ACGT\")\n# use observed frequencies\nfreq=[seq.count(b)/n for b in bases]\nsims=[]\nN=200\nlr=lp=lh=lo=0\nfor _ in range(N):\n    s=\"\".join(random.choices(bases, weights=freq, k=n))\n    lr=max(lr,longest_repeat_len(s))\n    lp=max(lp,longest_pal(s))\n    lh=max(lh,longest_homop(s))\n    sims.append(longest_orf(s))\nprint(\"MC over %d random seqs:\"%N)\nprint(\" max longest exact repeat:\", lr)\nprint(\" max longest palindrome:\", lp)\nprint(\" max longest homopolymer:\", lh)\nprint(\" longest ATG-ORF bp: mean %.1f max %d\"%(sum(sims)/len(sims), max(sims)), \" observed\", longest_orf(seq))\n"
+      },
+      "is_error": false,
+      "output_chars": 272,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nimport re\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\nn=len(seq)\n\n# G-quadruplex scan (G3+ N1-7 repeated 4x)\ng4=re.compile(r'(?=(G{3,}\\w{1,7}G{3,}\\w{1,7}G{3,}\\w{1,7}G{3,}))')\nprint(\"G-quadruplex-like motifs:\")\nfor m in g4.finditer(seq):\n    print(m.start()+1, m.group(1)[:60])\n\n# sliding window GC extremes (100bp)\nw=100\nvals=[]\nfor i in range(0,n-w+1):\n    s=seq[i:i+w]\n    vals.append(((s.count('G')+s.count('C'))/w, i+1))\nvals.sort()\nprint(\"\\nmost AT-rich 100bp window:\", \"%.2f\"%vals[0][0], \"at\", vals[0][1])\nprint(\"most GC-rich 100bp window:\", \"%.2f\"%vals[-1][0], \"at\", vals[-1][1])\n\n# longest single-base-composition (low complexity) segment\n# report regions with max homopolymer already done (8)\nprint(\"\\nLongest homopolymer run present:\", max((len(m.group()), m.group(), m.start()+1) for m in re.finditer(r'(A+|T+|G+|C+)', seq)))\n"
+      },
+      "is_error": false,
+      "output_chars": 162,
+      "nt_run": 0
+    },
+    {
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = \"\".join(l.strip() for l in open(\"region.fasta\") if not l.startswith(\">\")).upper()\nn=len(seq)\ndef rc(s): return s.translate(str.maketrans(\"ACGT\",\"TGCA\"))[::-1]\nstop={\"TAA\",\"TAG\",\"TGA\"}\ndef get_orfs(t, strand):\n    out=[]\n    for f in range(3):\n        start=None\n        for j in range(f,len(t)-2,3):\n            cod=t[j:j+3]\n            if cod==\"ATG\" and start is None: start=j\n            if cod in stop:\n                if start is not None:\n                    aa=(j-start)//3\n                    if aa>=50: out.append((start,j+3,aa))\n                start=None\n    return out\nprint(\"Plus-strand ORFs (>=50 aa), 1-based inclusive, coding start..(stop-1):\")\nfor a,b,aa in get_orfs(seq,'+'):\n    print(\"  %d - %d  (%d codons)\"%(a+1,b,aa))\nprint(\"Reverse-strand ORFs (plus-strand coords):\")\nr=rc(seq)\nfor a,b,aa in get_orfs(r,'-'):\n    print(\"  %d - %d  (%d codons)\"%(n-b+1,n-a,aa))\n\n# longest exact repeat location\nL=12\nseen={}\nfor i in range(n-L+1):\n    sub=seq[i:i+L]\n    if sub in seen:\n        print(\"\\nLongest exact repeat (%d bp):\"%L, sub, \"at\", seen[sub]+1, \"and\", i+1)\n    seen[sub]=i\n\n# palindrome location\ncomp={'A':'T','T':'A','G':'C','C':'G'}\nbest=(0,0)\nfor c in range(n):\n    k=0\n    while c-k-1>=0 and c+k<n and comp[seq[c-k-1]]==seq[c+k]:\n        k+=1\n    if 2*k>best[0]: best=(2*k,c-k)\nprint(\"Longest even palindrome:\", best[0],\"bp at\", best[1]+1,\"-\",best[1]+best[0])\n"
+      },
+      "is_error": false,
+      "output_chars": 297,
+      "nt_run": 0
+    }
+  ],
+  "request_ids": [
+    "02179123957697930d072d337ea6fcc7bbfbe2f0c485be286d7a7",
+    "021791239579074978acb49f7cce3ba6727b8cdf360fb7e3a0fb5",
+    "02179123958207085f4608cdee6bbc8f8aaf952504d48fd9a2eec",
+    "021791239585597c4d1375e87394ab549407fb4b34ce52efc632e",
+    "021791239596077f6062c0432612ee8d02c106a4a445010e17fa4",
+    "021791239605217fef143c4098cd8cc7e0dd8c08d18f9db6146c8",
+    "02179123960980535338acc098a5d522f02313a829aa570910f3b",
+    "02179123961940545ed1e5750293ff098e8b34eca79d24a1389b1",
+    "021791239629588c0a335079e7be4c79ef57584e00819ba8f6869",
+    "021791239637526b965c2d2b2bb89ed3e2dfeb918ea3f76f5eedc",
+    "02179123964409115b33ccaa151d3ed7feaaa761bc71c377b1c87",
+    "02179123965244849d9e4e345fff0a9cbe1dfa11f8e7ca069c887"
+  ],
+  "input_tokens": 83255,
+  "output_tokens": 10957,
+  "status": "end_turn",
+  "forced_report": false,
+  "refusal_category": null,
+  "report": "## Report on `region.fasta` (`>locus_009`)\n\n**What I did.** I loaded the 3,000 bp sequence and checked base composition, GC skew, open reading frames (both strands, all frames), exact/direct tandem repeats and microsatellites, inverted repeats/palindromes, homopolymer runs, potential G\u2011quadruplex motifs, composition windows, and common restriction/regulatory motifs. I then compared the results against 200 shuffled sequences of the same length and base composition.\n\n**Basic properties**\n- Length: exactly 3,000 bp. Composition: G 795, C 779, T 735, A 691 \u2192 **GC = 52.5%**, essentially balanced with a slight GC bias.\n- GC skew across 250\u2011bp windows fluctuates around 0 (range \u2248 \u22120.12 to +0.17), i.e. no directional strand bias.\n- 100\u2011bp GC windows range 39%\u201366%, within normal binomial scatter for a 52.5% sequence.\n- Dinucleotide odds ratios are all ~1.0 (0.96\u20131.08) \u2192 no unusual dinucleotide bias.\n\n**Open reading frames** (no long, gene\u2011like ORF)\n- Plus strand, 204\u2013413 (69 codons)\n- Plus strand, 1459\u20131647 (62 codons)\n- Reverse strand, plus coordinates 661\u2013930 (89 codons)\n\nThe longest stop\u2011free stretch anywhere is only ~411 bp (~137 codons; reverse strand, spanning roughly plus coordinates 663\u20131074). There is no ORF of the length expected for a protein\u2011coding gene.\n\n**Repetitive / structural features**\n- Longest exact repeated substring: only 12 bp \u2014 `GTTTCTTCACCG` at 1848\u20131859 and 2341\u20132352.\n- No tandem repeats or microsatellites (no di-/tri-/tetranucleotide arrays beyond trivial homopolymers).\n- Longest inverted repeat/palindrome: 14 bp at 2310\u20132323; no stem\u2011loop longer than that (no hairpin/G\u2011quadruplex motifs found).\n- Homopolymer runs are short: longest is 8 C's at 2964\u20132971, next a 7\u2011T run at 2036\u20132042.\n\n**Restriction sites / motifs**\nScattered common 6\u2011cutter sites only (e.g. EcoRI at 679 and 2314, BamHI at 1236, SalI at 2527, PstI at 88/341/2543, NcoI at 1766), none clustered into anything meaningful. A single Shine\u2013Dalgarno\u2011like `AGGAGG` at 2485 and three `CCAAT` boxes (2186, 2266, 2894) are the only regulatory\u2011like hits.\n\n**Bottom line**\nNothing stands out. Every statistic I measured is at or below what is expected from a random sequence of this length and composition: no long ORFs, no repeats longer than ~12\u201314 bp, no tandem arrays, no strong secondary\u2011structure motifs, and no strand or composition bias. The region behaves like arbitrary, apparently non\u2011coding DNA; no feature warrants description beyond the short ORFs listed above.",
+  "nt_run_from_tools": 0,
+  "provider": "opencode-go",
+  "rep": 0,
+  "claims": {
+    "claims_repeat_array": false,
+    "unit_length": null,
+    "copy_number": null,
+    "start": null,
+    "end": null,
+    "supporting_quote": null,
+    "other_notable_features": []
+  },
+  "judge_model": "kimi-k2.7-code"
+}

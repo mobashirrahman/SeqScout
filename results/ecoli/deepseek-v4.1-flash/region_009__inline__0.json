@@ -1,0 +1,561 @@
+{
+  "started_at": "2026-10-05T23:43:53+00:00",
+  "prompt_hash": "6548b398e9a9",
+  "code_hash": "7c7d70e28d52",
+  "locus": "region_009",
+  "condition": "inline",
+  "model": "deepseek-v4.1-flash",
+  "effort": null,
+  "read_default": 2000,
+  "max_turns": 20,
+  "tool_calls": [
+    {
+      "turn": 0,
+      "name": "list_files",
+      "input": {},
+      "is_error": false,
+      "output_chars": 17,
+      "nt_run": 0
+    },
+    {
+      "turn": 0,
+      "name": "read_file",
+      "input": {
+        "path": "region.fasta",
+        "length": 600
+      },
+      "is_error": false,
+      "output_chars": 627,
+      "nt_run": 580
+    },
+    {
+      "turn": 1,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = []\nwith open('region.fasta') as f:\n    for line in f:\n        if line.startswith('>'):\n            header=line.strip()\n        else:\n            seq.append(line.strip())\nseq=''.join(seq)\nprint(header)\nprint('length', len(seq))\nfrom collections import Counter\nprint(Counter(seq))\nprint('GC %.2f' % (100*(seq.count('G')+seq.count('C'))/len(seq)))\ncomp = {'A':'T','T':'A','G':'C','C':'G','N':'N'}\nrev = ''.join(comp.get(c,c) for c in seq[::-1])\n# ORF finder\ncodon_table = {\n'TTT':'F','TTC':'F','TTA':'L','TTG':'L','TCT':'S','TCC':'S','TCA':'S','TCG':'S','TAT':'Y','TAC':'Y','TAA':'*','TAG':'*','TGT':'C','TGC':'C','TGA':'*','TGG':'W',\n'CTT':'L','CTC':'L','CTA':'L','CTG':'L','CCT':'P','CCC':'P','CCA':'P','CCG':'P','CAT':'H','CAC':'H','CAA':'Q','CAG':'Q','CGT':'R','CGC':'R','CGA':'R','CGG':'R',\n'ATT':'I','ATC':'I','ATA':'I','ATG':'M','ACT':'T','ACC':'T','ACA':'T','ACG':'T','AAT':'N','AAC':'N','AAA':'K','AAG':'K','AGT':'S','AGC':'S','AGA':'R','AGG':'R',\n'GTT':'V','GTC':'V','GTA':'V','GTG':'V','GCT':'A','GCC':'A','GCA':'A','GCG':'A','GAT':'D','GAC':'D','GAA':'E','GAG':'E','GGT':'G','GGC':'G','GGA':'G','GGG':'G'}\ndef translate(s):\n    return ''.join(codon_table.get(s[i:i+3],'X') for i in range(0,len(s)-2,3))\n\ndef find_orfs(s, strand='+', min_aa=50):\n    orfs=[]\n    for frame in range(3):\n        i=frame\n        # scan for start codon then stop\n        while i+3 <= len(s):\n            codon=s[i:i+3]\n            if codon in ('ATG','GTG','TTG'):\n                j=i\n                while j+3<=len(s):\n                    if s[j:j+3] in ('TAA','TAG','TGA'):\n                        aa=(j-i)//3\n                        if aa>=min_aa:\n                            orfs.append((i,j+3,aa,s[i:j+3],strand,frame))\n                        break\n                    j+=3\n                i=j+3\n            else:\n                i+=3\n    return orfs\n\norfs_plus=find_orfs(seq,'+',50)\norfs_minus=find_orfs(rev,'-',50)\n# convert minus to plus coords\norfs=[]\nfor o in orfs_plus:\n    orfs.append(o)\nfor o in orfs_minus:\n    i,j,aa,nt,strand,frame=o\n    # rev coords: nt corresponds to rev[i:j], plus coords [L-j, L-i]\n    orfs.append((len(seq)-j, len(seq)-i, aa, nt, '-', frame))\norfs.sort(key=lambda x: (x[4], x[0]))\nfor o in orfs:\n    print(o[4], o[0], o[1], 'len_aa', o[2], 'frame', o[5], 'start', translate(o[3])[:20])\n"
+      },
+      "is_error": false,
+      "output_chars": 818,
+      "nt_run": 0
+    },
+    {
+      "turn": 2,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = ''.join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\ncomp = {'A':'T','T':'A','G':'C','C':'G','N':'N'}\nrev = ''.join(comp.get(c,c) for c in seq[::-1])\ncode = {\n'TTT':'F','TTC':'F','TTA':'L','TTG':'L','TCT':'S','TCC':'S','TCA':'S','TCG':'S','TAT':'Y','TAC':'Y','TAA':'*','TAG':'*','TGT':'C','TGC':'C','TGA':'*','TGG':'W',\n'CTT':'L','CTC':'L','CTA':'L','CTG':'L','CCT':'P','CCC':'P','CCA':'P','CCG':'P','CAT':'H','CAC':'H','CAA':'Q','CAG':'Q','CGT':'R','CGC':'R','CGA':'R','CGG':'R',\n'ATT':'I','ATC':'I','ATA':'I','ATG':'M','ACT':'T','ACC':'T','ACA':'T','ACG':'T','AAT':'N','AAC':'N','AAA':'K','AAG':'K','AGT':'S','AGC':'S','AGA':'R','AGG':'R',\n'GTT':'V','GTC':'V','GTA':'V','GTG':'V','GCT':'A','GCC':'A','GCA':'A','GCG':'A','GAT':'D','GAC':'D','GAA':'E','GAG':'E','GGT':'G','GGC':'G','GGA':'G','GGG':'G'}\ndef translate(s):\n    return ''.join(code.get(s[i:i+3],'X') for i in range(0,len(s)-2,3))\nfor strand,s in [('+',seq),('-',rev)]:\n    print('STRAND', strand)\n    for f in range(3):\n        prot = translate(s[f:])\n        # print segments between stops longer than 30 aa\n        segs=[]\n        start=0\n        for k,aa in enumerate(prot):\n            if aa=='*':\n                if k-start>=30:\n                    segs.append((start,k,(k-start),prot[start:k]))\n                start=k+1\n        if len(prot)-start>=30:\n            segs.append((start,len(prot),len(prot)-start,prot[start:]))\n        for a,b,l,p in segs:\n            if strand=='+':\n                print(' frame',f,'nt',f+a*3,f+b*3,'aa',l, p[:40])\n            else:\n                # rev coords\n                print(' frame',f,'nt',len(seq)-(f+b*3),len(seq)-(f+a*3),'aa',l, p[:40])\n"
+      },
+      "is_error": false,
+      "output_chars": 3681,
+      "nt_run": 0
+    },
+    {
+      "turn": 3,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = ''.join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nL=len(seq)\ncomp = {'A':'T','T':'A','G':'C','C':'G','N':'N'}\nrev = ''.join(comp.get(c,c) for c in seq[::-1])\ncode = {\n'TTT':'F','TTC':'F','TTA':'L','TTG':'L','TCT':'S','TCC':'S','TCA':'S','TCG':'S','TAT':'Y','TAC':'Y','TAA':'*','TAG':'*','TGT':'C','TGC':'C','TGA':'*','TGG':'W',\n'CTT':'L','CTC':'L','CTA':'L','CTG':'L','CCT':'P','CCC':'P','CCA':'P','CCG':'P','CAT':'H','CAC':'H','CAA':'Q','CAG':'Q','CGT':'R','CGC':'R','CGA':'R','CGG':'R',\n'ATT':'I','ATC':'I','ATA':'I','ATG':'M','ACT':'T','ACC':'T','ACA':'T','ACG':'T','AAT':'N','AAC':'N','AAA':'K','AAG':'K','AGT':'S','AGC':'S','AGA':'R','AGG':'R',\n'GTT':'V','GTC':'V','GTA':'V','GTG':'V','GCT':'A','GCC':'A','GCA':'A','GCG':'A','GAT':'D','GAC':'D','GAA':'E','GAG':'E','GGT':'G','GGC':'G','GGA':'G','GGG':'G'}\ndef translate(s):\n    return ''.join(code.get(s[i:i+3],'X') for i in range(0,len(s)-2,3))\ndef orfs_all(s, strand):\n    res=[]\n    for f in range(3):\n        # find stop positions in this frame\n        stops=[i for i in range(f,len(s)-2,3) if s[i:i+3] in ('TAA','TAG','TGA')]\n        # boundaries: -1 and each stop\n        bounds=[-3]+stops+[len(s)]\n        for a,b in zip(bounds, bounds[1:]):\n            # segment after a to b (start at a+3)\n            seg_start=a+3\n            seg_end=b\n            if seg_end-seg_start < 90: # 30 aa\n                continue\n            # find all starts\n            for i in range(seg_start, seg_end-2,3):\n                if s[i:i+3] in ('ATG','GTG','TTG'):\n                    aa=(seg_end-i)//3\n                    res.append((i,seg_end,aa,strand,f,s[i:i+3]))\n    # convert coords for minus\n    out=[]\n    for i,j,aa,strand,f,startcodon in res:\n        if strand=='+':\n            out.append((i,j,aa,strand,f,startcodon))\n        else:\n            out.append((L-j,L-i,aa,strand,f,startcodon))\n    return out\nallorfs=orfs_all(seq,'+')+orfs_all(rev,'-')\n# cluster by similar stop points? sort\nallorfs.sort(key=lambda x:(x[0],x[3],x[1]))\nfor o in allorfs:\n    i,j,aa,strand,f,sc=o\n    print(f'{strand} {i:4d}-{j:4d} aa={aa:3d} frame={f} start={sc} aa_start={translate(rev[i:j] if strand==\"-\" else seq[i:j])[:30]}')\n"
+      },
+      "is_error": false,
+      "output_chars": 10848,
+      "nt_run": 0
+    },
+    {
+      "turn": 4,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = ''.join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nL=len(seq)\ncomp = {'A':'T','T':'A','G':'C','C':'G','N':'N'}\nrev = ''.join(comp.get(c,c) for c in seq[::-1])\ncode = {\n'TTT':'F','TTC':'F','TTA':'L','TTG':'L','TCT':'S','TCC':'S','TCA':'S','TCG':'S','TAT':'Y','TAC':'Y','TAA':'*','TAG':'*','TGT':'C','TGC':'C','TGA':'*','TGG':'W',\n'CTT':'L','CTC':'L','CTA':'L','CTG':'L','CCT':'P','CCC':'P','CCA':'P','CCG':'P','CAT':'H','CAC':'H','CAA':'Q','CAG':'Q','CGT':'R','CGC':'R','CGA':'R','CGG':'R',\n'ATT':'I','ATC':'I','ATA':'I','ATG':'M','ACT':'T','ACC':'T','ACA':'T','ACG':'T','AAT':'N','AAC':'N','AAA':'K','AAG':'K','AGT':'S','AGC':'S','AGA':'R','AGG':'R',\n'GTT':'V','GTC':'V','GTA':'V','GTG':'V','GCT':'A','GCC':'A','GCA':'A','GCG':'A','GAT':'D','GAC':'D','GAA':'E','GAG':'E','GGT':'G','GGC':'G','GGA':'G','GGG':'G'}\ndef translate(s):\n    return ''.join(code.get(s[i:i+3],'X') for i in range(0,len(s)-2,3))\ndef main_orfs(s, strand):\n    res=[]\n    for f in range(3):\n        # positions of stops\n        prot=translate(s[f:])\n        start_aa=None\n        for k,aa in enumerate(prot):\n            nt=f+3*k\n            if aa=='*':\n                if start_aa is not None and k-start_aa>=50:\n                    # find first start codon in this segment\n                    for idx in range(start_aa,k):\n                        codon=s[f+3*idx:f+3*idx+3]\n                        if codon in ('ATG','GTG','TTG'):\n                            res.append((f+3*idx, f+3*k, k-idx, codon, prot[idx:k]))\n                            break\n                start_aa=None\n            else:\n                if start_aa is None:\n                    start_aa=k\n        # trailing\n        if start_aa is not None and len(prot)-start_aa>=50:\n            for idx in range(start_aa,len(prot)):\n                codon=s[f+3*idx:f+3*idx+3]\n                if codon in ('ATG','GTG','TTG'):\n                    res.append((f+3*idx, f+3*len(prot), len(prot)-idx, codon, prot[idx:]))\n                    break\n    out=[]\n    for i,j,aa,codon,prot in res:\n        if strand=='+':\n            out.append((i,j,aa,codon,prot,strand))\n        else:\n            # plus coords\n            out.append((L-j,L-i,aa,codon,prot,strand))\n    return out\norfs=main_orfs(seq,'+')+main_orfs(rev,'-')\norfs.sort(key=lambda x:x[0])\nfor i,j,aa,codon,prot,strand in orfs:\n    print(f'{strand} {i:4d}-{j:4d} aa={aa:3d} start={codon} {prot[:60]}')\n"
+      },
+      "is_error": false,
+      "output_chars": 1904,
+      "nt_run": 0
+    },
+    {
+      "turn": 5,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = ''.join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nL=len(seq)\n# GC and skew in windows\nfor w in [100,200,300,500]:\n    print('window',w)\n    vals=[]\n    for i in range(0,L-w+1,w):\n        sub=seq[i:i+w]\n        g=sub.count('G'); c=sub.count('C'); a=sub.count('A'); t=sub.count('T')\n        gc=100*(g+c)/w\n        skew=(g-c)/(g+c) if g+c else 0\n        at=(a-t)/(a+t) if a+t else 0\n        vals.append((i,i+w,round(gc,1),round(skew,2),round(at,2)))\n    # print compact\n    for v in vals:\n        print(v)\n    print()\n"
+      },
+      "is_error": false,
+      "output_chars": 1939,
+      "nt_run": 0
+    },
+    {
+      "turn": 6,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = ''.join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nL=len(seq)\ncomp = {'A':'T','T':'A','G':'C','C':'G','N':'N'}\nrev = ''.join(comp.get(c,c) for c in seq[::-1])\ncode = {\n'TTT':'F','TTC':'F','TTA':'L','TTG':'L','TCT':'S','TCC':'S','TCA':'S','TCG':'S','TAT':'Y','TAC':'Y','TAA':'*','TAG':'*','TGT':'C','TGC':'C','TGA':'*','TGG':'W',\n'CTT':'L','CTC':'L','CTA':'L','CTG':'L','CCT':'P','CCC':'P','CCA':'P','CCG':'P','CAT':'H','CAC':'H','CAA':'Q','CAG':'Q','CGT':'R','CGC':'R','CGA':'R','CGG':'R',\n'ATT':'I','ATC':'I','ATA':'I','ATG':'M','ACT':'T','ACC':'T','ACA':'T','ACG':'T','AAT':'N','AAC':'N','AAA':'K','AAG':'K','AGT':'S','AGC':'S','AGA':'R','AGG':'R',\n'GTT':'V','GTC':'V','GTA':'V','GTG':'V','GCT':'A','GCC':'A','GCA':'A','GCG':'A','GAT':'D','GAC':'D','GAA':'E','GAG':'E','GGT':'G','GGC':'G','GGA':'G','GGG':'G'}\ndef translate(s):\n    return ''.join(code.get(s[i:i+3],'X') for i in range(0,len(s)-2,3))\ndef rbs_score(up):\n    # simple scan for AGGAGG-like motifs in -20..-1; return best number of paired bases with 16S CCUCCU\n    # simplified: longest match to core AGGA/GGAG/AAGG/GGGG\n    motifs=['AGGAGG','AGGA','GGAG','AAGG','GGGG','AGGAG','GAGG']\n    up=up.upper()\n    best=0; bestmot=''\n    for m in motifs:\n        pos=up.rfind(m)\n        if pos!=-1:\n            if len(m)>best:\n                best=len(m); bestmot=m\n    return best, bestmot\ndef get_orfs(s, strand):\n    res=[]\n    for f in range(3):\n        prot=translate(s[f:])\n        seg_starts=[]\n        # boundaries\n        starts=[0]\n        # walk through stops\n        last=0\n        for k,aa in enumerate(prot):\n            if aa=='*':\n                if k-last>=30: # aa length\n                    seg_starts.append((last,k))\n                last=k+1\n        if len(prot)-last>=30:\n            seg_starts.append((last,len(prot)))\n        for a,b in seg_starts:\n            # all starts in segment\n            for idx in range(a,b):\n                if idx+1>b: break\n                codon=s[f+3*idx:f+3*idx+3]\n                if codon in ('ATG','GTG','TTG'):\n                    aa_len=b-idx\n                    if aa_len<30: continue\n                    prot_seq=prot[idx:b]\n                    # upstream in this strand coordinate\n                    up_start=max(0,f+3*idx-20)\n                    upstream=s[up_start:f+3*idx]\n                    score,mot=rbs_score(upstream)\n                    res.append((f+3*idx, f+3*b, aa_len, codon, score, mot, upstream, prot_seq))\n    out=[]\n    for i,j,aa,codon,score,mot,up,prot_seq in res:\n        if strand=='+':\n            out.append((i,j,aa,codon,score,mot,up,prot_seq,strand))\n        else:\n            plus_i=L-j; plus_j=L-i\n            # upstream for minus is reverse complement of downstream? Actually upstream on minus = rev[j-20:j]\n            up_minus=rev[max(0,j-20):j]\n            score,mot=rbs_score(up_minus)\n            out.append((plus_i,plus_j,aa,codon,score,mot,up_minus,prot_seq,strand))\n    return out\nallorfs=get_orfs(seq,'+')+get_orfs(rev,'-')\n# filter unique-ish: for each segment, choose best start? Let's collect ORFs >= 100 aa first\nprint('ORFs >= 100 aa (first listed per start):')\nfor o in sorted(allorfs,key=lambda x:(x[0],x[8])):\n    i,j,aa,codon,score,mot,up,prot_seq,strand=o\n    if aa>=100:\n        print(f'{strand} {i:4d}-{j:4d} aa={aa:3d} start={codon} rbs={score}{mot} up={up} {prot_seq[:50]}')\nprint('\\nORFs 50-99 aa:')\nfor o in sorted(allorfs,key=lambda x:(x[0],x[8])):\n    i,j,aa,codon,score,mot,up,prot_seq,strand=o\n    if 50<=aa<100:\n        print(f'{strand} {i:4d}-{j:4d} aa={aa:3d} start={codon} rbs={score}{mot} up={up} {prot_seq[:50]}')\n"
+      },
+      "is_error": false,
+      "output_chars": 8336,
+      "nt_run": 20
+    },
+    {
+      "turn": 7,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = ''.join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nfor start,end in [(0,120),(230,320),(1160,1260),(1580,1680),(2050,2160),(2060,2130),(2500,2560),(2640,2700)]:\n    print('\\nregion',start,end)\n    for i in range(start,end,60):\n        print(i, seq[i:i+60])\n# show translations of specific frames around 250-330\ncode = {\n'TTT':'F','TTC':'F','TTA':'L','TTG':'L','TCT':'S','TCC':'S','TCA':'S','TCG':'S','TAT':'Y','TAC':'Y','TAA':'*','TAG':'*','TGT':'C','TGC':'C','TGA':'*','TGG':'W',\n'CTT':'L','CTC':'L','CTA':'L','CTG':'L','CCT':'P','CCC':'P','CCA':'P','CCG':'P','CAT':'H','CAC':'H','CAA':'Q','CAG':'Q','CGT':'R','CGC':'R','CGA':'R','CGG':'R',\n'ATT':'I','ATC':'I','ATA':'I','ATG':'M','ACT':'T','ACC':'T','ACA':'T','ACG':'T','AAT':'N','AAC':'N','AAA':'K','AAG':'K','AGT':'S','AGC':'S','AGA':'R','AGG':'R',\n'GTT':'V','GTC':'V','GTA':'V','GTG':'V','GCT':'A','GCC':'A','GCA':'A','GCG':'A','GAT':'D','GAC':'D','GAA':'E','GAG':'E','GGT':'G','GGC':'G','GGA':'G','GGG':'G'}\ndef tr(s):\n    return ''.join(code.get(s[i:i+3],'X') for i in range(0,len(s)-2,3))\nfor f in range(3):\n    print('frame',f, 'start 240-330', seq[240:330])\n    print(tr(seq[240+f:330]))\n"
+      },
+      "is_error": false,
+      "output_chars": 1485,
+      "nt_run": 91
+    },
+    {
+      "turn": 8,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = ''.join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nL=len(seq)\ncomp = {'A':'T','T':'A','G':'C','C':'G','N':'N'}\nrev = ''.join(comp.get(c,c) for c in seq[::-1])\ncode = {\n'TTT':'F','TTC':'F','TTA':'L','TTG':'L','TCT':'S','TCC':'S','TCA':'S','TCG':'S','TAT':'Y','TAC':'Y','TAA':'*','TAG':'*','TGT':'C','TGC':'C','TGA':'*','TGG':'W',\n'CTT':'L','CTC':'L','CTA':'L','CTG':'L','CCT':'P','CCC':'P','CCA':'P','CCG':'P','CAT':'H','CAC':'H','CAA':'Q','CAG':'Q','CGT':'R','CGC':'R','CGA':'R','CGG':'R',\n'ATT':'I','ATC':'I','ATA':'I','ATG':'M','ACT':'T','ACC':'T','ACA':'T','ACG':'T','AAT':'N','AAC':'N','AAA':'K','AAG':'K','AGT':'S','AGC':'S','AGA':'R','AGG':'R',\n'GTT':'V','GTC':'V','GTA':'V','GTG':'V','GCT':'A','GCC':'A','GCA':'A','GCG':'A','GAT':'D','GAC':'D','GAA':'E','GAG':'E','GGT':'G','GGC':'G','GGA':'G','GGG':'G'}\ndef translate(s):\n    return ''.join(code.get(s[i:i+3],'X') for i in range(0,len(s)-2,3))\n# Kyte-Doolittle\nkd = {'A':1.8,'R':-4.5,'N':-3.5,'D':-3.5,'C':2.5,'Q':-3.5,'E':-3.5,'G':-0.4,'H':-3.2,'I':4.5,'L':3.8,'K':-3.9,'M':1.9,'F':2.8,'P':-1.6,'S':-0.8,'T':-0.7,'W':-0.9,'Y':-1.3,'V':4.2}\ndef gravy(p):\n    return sum(kd.get(a,0) for a in p)/len(p)\ndef tm_segments(p, win=19, thresh=1.6):\n    if len(p)<win: return []\n    vals=[]\n    for i in range(len(p)-win+1):\n        vals.append(sum(kd.get(a,0) for a in p[i:i+win])/win)\n    # find contiguous regions above threshold\n    segs=[]; start=None\n    for i,v in enumerate(vals):\n        if v>=thresh and start is None:\n            start=i\n        elif v<thresh and start is not None:\n            segs.append((start,i+win-1,max(vals[start:i+win-1])))\n            start=None\n    if start is not None:\n        segs.append((start,len(vals)+win-1,max(vals[start:])))\n    # merge if close (<5)\n    merged=[]\n    for s in segs:\n        if merged and s[0]-merged[-1][1] < 5:\n            a,b,m=merged.pop(); merged.append((a,s[1],max(m,s[2])))\n        else:\n            merged.append(s)\n    return merged\norfs = [\n('+',270,1158,'MDAKQTRQGVLLALAAYFIWGIAPAYFKLIYYVPADEILTHRVIWSFFFMVVLMSICRQWSYLKTLIQTPQKIFMLAVSAVLIGGNWLLFIWAVNNHHMLEASLGYFINPLVNIVLGMIFLGERFRRMQWLAVILAICGVLVQLWTFGSLPIIALGLAFSFAFYGLVRKKIAVEAQTGMLIETMWLLPVAAIYLFAIADSSTSHMGQNPMSLNLLLIAAGIVTTVPLLCFTAAATRLRLSTLGFFQYIGPTLMFLLAVTFYGEKPGADKMVTFAFIWVALAIFVMDAIYTQRRTSK'),\n('+',1195,1633,'LHESGHIAMLTGDSYKDVKFMLRIFIPTSNGKISRRRYIFSFILINFIFAFLIIFFNDGEAGFLVIVSTIVLHYLVINMNCSDSVIVVF)\n] if False else None\n# define manually by translating\nitems=[('+',270,1158),('+',1195,1633),('+',1575,1617),('+',1607,2027),('+',1808,2027),('+',2253,2523),('+',2525,2963),('+',2743,2998),('-',2075,2750),('-',2650,2950),('-',2075,2675),('-',2075,2654),('-',848,1013),('-',996,1242)]\nfor strand,i,j in items:\n    if strand=='+':\n        p=translate(seq[i:j])\n    else:\n        p=translate(rev[i:j])  # rev already complement; but need coords? For minus, plus coords i,j; rev coords L-j,L-i\n        p=translate(rev[L-j:L-i])\n    # remove possible X\n    if 'X' in p: p=p.split('X')[0]\n    print(f'\\n{strand} {i}-{j} length {j-i} nt, {len(p)} aa, GRAVY {gravy(p):.2f}')\n    print(p[:120])\n    segs=tm_segments(p)\n    print('predicted hydrophobic segments (aa):', [(a+1,b+1,round(m,2)) for a,b,m in segs])\n"
+      },
+      "is_error": false,
+      "output_chars": 232,
+      "nt_run": 0
+    },
+    {
+      "turn": 9,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = ''.join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nL=len(seq)\ncomp = {'A':'T','T':'A','G':'C','C':'G','N':'N'}\nrev = ''.join(comp.get(c,c) for c in seq[::-1])\ncode = {\n'TTT':'F','TTC':'F','TTA':'L','TTG':'L','TCT':'S','TCC':'S','TCA':'S','TCG':'S','TAT':'Y','TAC':'Y','TAA':'*','TAG':'*','TGT':'C','TGC':'C','TGA':'*','TGG':'W',\n'CTT':'L','CTC':'L','CTA':'L','CTG':'L','CCT':'P','CCC':'P','CCA':'P','CCG':'P','CAT':'H','CAC':'H','CAA':'Q','CAG':'Q','CGT':'R','CGC':'R','CGA':'R','CGG':'R',\n'ATT':'I','ATC':'I','ATA':'I','ATG':'M','ACT':'T','ACC':'T','ACA':'T','ACG':'T','AAT':'N','AAC':'N','AAA':'K','AAG':'K','AGT':'S','AGC':'S','AGA':'R','AGG':'R',\n'GTT':'V','GTC':'V','GTA':'V','GTG':'V','GCT':'A','GCC':'A','GCA':'A','GCG':'A','GAT':'D','GAC':'D','GAA':'E','GAG':'E','GGT':'G','GGC':'G','GGA':'G','GGG':'G'}\ndef translate(s):\n    return ''.join(code.get(s[i:i+3],'X') for i in range(0,len(s)-2,3))\nkd = {'A':1.8,'R':-4.5,'N':-3.5,'D':-3.5,'C':2.5,'Q':-3.5,'E':-3.5,'G':-0.4,'H':-3.2,'I':4.5,'L':3.8,'K':-3.9,'M':1.9,'F':2.8,'P':-1.6,'S':-0.8,'T':-0.7,'W':-0.9,'Y':-1.3,'V':4.2}\ndef gravy(p):\n    return sum(kd.get(a,0) for a in p)/max(1,len(p))\ndef tm_segments(p, win=19, thresh=1.6):\n    if len(p)<win: return []\n    vals=[sum(kd.get(a,0) for a in p[i:i+win])/win for i in range(len(p)-win+1)]\n    segs=[]; start=None\n    for i,v in enumerate(vals):\n        if v>=thresh and start is None:\n            start=i\n        elif v<thresh and start is not None:\n            segs.append((start,i+win-1,max(vals[start:i+win-1])))\n            start=None\n    if start is not None:\n        segs.append((start,len(vals)+win-1,max(vals[start:])))\n    merged=[]\n    for s in segs:\n        if merged and s[0]-merged[-1][1] < 5:\n            a,b,m=merged.pop(); merged.append((a,s[1],max(m,s[2])))\n        else:\n            merged.append(s)\n    return merged\n\nitems=[('+',270,1158),('+',1195,1633),('+',1575,1617),('+',1607,2027),('+',1808,2027),('+',2253,2523),('+',2525,2963),('+',2743,2998),('-',2075,2750),('-',2650,2950),('-',2075,2675),('-',2075,2654),('-',848,1013),('-',996,1242)]\nfor strand,i,j in items:\n    if strand=='+':\n        nt=seq[i:j]\n    else:\n        nt=rev[L-j:L-i]\n    p=translate(nt)\n    # cut at first stop\n    if '*' in p: p=p.split('*')[0]\n    print(f'\\n{strand} {i}-{j} length {j-i} nt, {len(p)} aa, GRAVY {gravy(p):.2f}')\n    print(p[:150])\n    segs=tm_segments(p)\n    print('hydrophobic segments (1-based aa, length, max KD):', [(a+1,b+1,b-a+1,round(m,2)) for a,b,m in segs])\n"
+      },
+      "is_error": false,
+      "output_chars": 3317,
+      "nt_run": 0
+    },
+    {
+      "turn": 10,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = ''.join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nfor start in [1580,1600,1620,1640,1660,1800]:\n    print(start, seq[start:start+80])\nprint()\nfor i in range(1580,1680):\n    if seq[i:i+3] in ('ATG','GTG','TTG','TAA','TAG','TGA'):\n        print(i, seq[i:i+3], 'frame', i%3, 'up', seq[max(0,i-20):i])\n"
+      },
+      "is_error": false,
+      "output_chars": 1050,
+      "nt_run": 80
+    },
+    {
+      "turn": 11,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = ''.join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nL=len(seq)\ncomp = {'A':'T','T':'A','G':'C','C':'G','N':'N'}\nrev = ''.join(comp.get(c,c) for c in seq[::-1])\n# exact repeats >= 20 bp\nk=20\npos={}\nfor i in range(L-k+1):\n    kmer=seq[i:i+k]\n    pos.setdefault(kmer,[]).append(i)\nprint('exact direct repeats >=20 bp:')\nfor kmer,ps in pos.items():\n    if len(ps)>1:\n        for a,b in zip(ps,ps[1:]):\n            print(a,b,kmer)\n# inverted repeats >= 18 bp (find kmer and its revcomp elsewhere)\nprint('\\ninverted repeats >=18 bp:')\nk=18\nseen=set()\nfor i in range(L-k+1):\n    kmer=seq[i:i+k]\n    rc=''.join(comp[c] for c in kmer[::-1])\n    # search rc after i+k\n    j=seq.find(rc,i+k)\n    if j!=-1:\n        key=(min(i,j),max(i,j))\n        if key not in seen:\n            seen.add(key)\n            print(i,j,kmer,rc)\n"
+      },
+      "is_error": false,
+      "output_chars": 57,
+      "nt_run": 0
+    },
+    {
+      "turn": 12,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = ''.join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nL=len(seq)\n# self dotplot with 50 bp windows, step 25, identity >= 70%\nw=50; step=25\nwindows=[seq[i:i+w] for i in range(0,L-w+1,step)]\nprint('window self-similarity >=70% (excluding diagonal near):')\nfor a in range(len(windows)):\n    wa=windows[a]\n    for b in range(a+1,len(windows)):\n        wb=windows[b]\n        # quick identity over w\n        matches=sum(1 for x,y in zip(wa,wb) if x==y)\n        idp=matches/w\n        if idp>=0.70:\n            # avoid overlapping same region\n            print(f'{a*step:4d}-{a*step+w:4d} vs {b*step:4d}-{b*step+w:4d} id={idp:.2f}')\n"
+      },
+      "is_error": false,
+      "output_chars": 56,
+      "nt_run": 0
+    },
+    {
+      "turn": 13,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = ''.join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nL=len(seq)\ncomp = {'A':'T','T':'A','G':'C','C':'G','N':'N'}\nrev = ''.join(comp.get(c,c) for c in seq[::-1])\ndef gc3(nt, frame=0):\n    codons=[nt[i:i+3] for i in range(frame,len(nt)-2,3)]\n    gc=0; total=0\n    for c in codons:\n        if len(c)<3: continue\n        total+=1\n        if c[2] in 'GC': gc+=1\n    return 100*gc/total if total else 0\nitems=[('+',270,1158),('+',1195,1633),('+',1607,2027),('+',1649,2027),('+',1808,2027),('+',2525,2963),('-',2075,2750),('-',2650,2950),('-',2075,2675)]\nfor strand,i,j in items:\n    if strand=='+':\n        nt=seq[i:j]\n    else:\n        nt=rev[L-j:L-i]\n    print(strand,i,j,'GC3 %.1f'%gc3(nt,0),'GC total %.1f'%(100*(nt.count('G')+nt.count('C'))/len(nt)),'len',j-i)\n"
+      },
+      "is_error": false,
+      "output_chars": 386,
+      "nt_run": 0
+    },
+    {
+      "turn": 14,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = ''.join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nL=len(seq)\ncomp={'A':'T','T':'A','G':'C','C':'G','N':'N'}\ndef rc(s): return ''.join(comp[c] for c in s[::-1])\n# search stem-loop: find inverted repeats with stem>=8, loop 3-12, and downstream U-rich\nprint('potential stem-loops (stem >=8, loop <=12, downstream U-rich):')\nfor stem in range(12,7,-1):\n    for i in range(L-stem):\n        left=seq[i:i+stem]\n        # search right arm downstream within reasonable distance\n        r=rc(left)\n        for j in range(i+stem+3, min(L-stem+1, i+stem+3+12)):\n            if seq[j:j+stem]==r:\n                loop=j-(i+stem)\n                downstream=seq[j+stem:j+stem+10]\n                u_frac=downstream.count('T')/len(downstream) if downstream else 0\n                if u_frac>=0.5:\n                    print(f'stem {i}-{i+stem-1} / {j}-{j+stem-1} loop {loop} down={downstream}')\n# search for poly-T tracts >=8\nprint('\\npoly-T tracts >=8:')\nfor i in range(L-8):\n    if seq[i:i+8]=='T'*8:\n        j=i\n        while j<L and seq[j]=='T': j+=1\n        print(i,j,seq[max(0,i-20):j+10])\n"
+      },
+      "is_error": false,
+      "output_chars": 233,
+      "nt_run": 0
+    },
+    {
+      "turn": 15,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = ''.join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nprint(seq[2000:2110])\nfor i in range(2020,2070):\n    print(i, seq[i:i+10])\n"
+      },
+      "is_error": false,
+      "output_chars": 911,
+      "nt_run": 110
+    },
+    {
+      "turn": 16,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = ''.join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nL=len(seq)\ncomp={'A':'T','T':'A','G':'C','C':'G','N':'N'}\ndef rc(s): return ''.join(comp[c] for c in s[::-1])\nhits=[]\nfor stem in range(6,13):\n    for i in range(L-stem):\n        left=seq[i:i+stem]\n        r=rc(left)\n        for loop in range(3,16):\n            j=i+stem+loop\n            if j+stem>L: break\n            if seq[j:j+stem]==r:\n                downstream=seq[j+stem:j+stem+10]\n                u=downstream.count('T')/max(1,len(downstream))\n                if u>=0.4:\n                    hits.append((i,j,stem,loop,u))\n# remove redundant (overlapping) report best\nhits.sort(key=lambda x:(-x[2],-x[4]))\nseen=[]\nfor h in hits:\n    i,j,stem,loop,u=h\n    if any(abs(i-a)<20 for a,b,c,d,e in seen):\n        continue\n    seen.append(h)\n    print(f'stem {i}-{i+stem-1} / {j}-{j+stem-1} stemlen={stem} loop={loop} downU={u:.2f} seq={seq[max(0,i-5):j+stem+10]}')\n"
+      },
+      "is_error": false,
+      "output_chars": 370,
+      "nt_run": 40
+    },
+    {
+      "turn": 17,
+      "name": "run_python",
+      "input": {
+        "code": "\nseq = ''.join(l.strip() for l in open('region.fasta') if not l.startswith('>'))\nL=len(seq)\n# search for RBS-like motifs and downstream start codons within 4-12 nt\nmotifs=['AGGAGG','AGGA','GGAG','AAGGAG','AGGAG','GGAGG']\nprint('RBS-like motifs and nearby start codons:')\nseen=set()\nfor m in motifs:\n    i=0\n    while True:\n        i=seq.find(m,i)\n        if i==-1: break\n        # look at start codons 4-12 nt downstream\n        for d in range(4,13):\n            st=i+len(m)+d\n            if st+3<=L and seq[st:st+3] in ('ATG','GTG','TTG'):\n                key=(i,st)\n                if key not in seen:\n                    seen.add(key)\n                    print(f'{m} at {i}-{i+len(m)-1}; start {seq[st:st+3]} at {st} (spacing {d}); upstream context {seq[max(0,i-10):st+3]}')\n        i+=1\n"
+      },
+      "is_error": false,
+      "output_chars": 977,
+      "nt_run": 33
+    },
+    {
+      "turn": 18,
+      "name": "run_python",
+      "input": {
+        "code": "\nimport shutil, os\nfor tool in ['blastn','tblastn','makeblastdb','hmmsearch','hmmscan','prokka','bakta','prodigal','geneMark','tRNAscan-SE','aragorn','mummer','diamond','blastp']:\n    print(tool, shutil.which(tool))\n"
+      },
+      "is_error": false,
+      "output_chars": 188,
+      "nt_run": 0
+    }
+  ],
+  "turns": [
+    {
+      "input_tokens": 2055,
+      "output_tokens": 291,
+      "cached_tokens": 512,
+      "tool_calls": 2,
+      "seconds": 3.7
+    },
+    {
+      "input_tokens": 2669,
+      "output_tokens": 892,
+      "cached_tokens": 2048,
+      "tool_calls": 1,
+      "seconds": 5.7
+    },
+    {
+      "input_tokens": 3971,
+      "output_tokens": 1678,
+      "cached_tokens": 2560,
+      "tool_calls": 1,
+      "seconds": 14.1
+    },
+    {
+      "input_tokens": 7577,
+      "output_tokens": 4669,
+      "cached_tokens": 3968,
+      "tool_calls": 1,
+      "seconds": 30.8
+    },
+    {
+      "input_tokens": 17449,
+      "output_tokens": 2298,
+      "cached_tokens": 7552,
+      "tool_calls": 1,
+      "seconds": 15.6
+    },
+    {
+      "input_tokens": 20766,
+      "output_tokens": 2006,
+      "cached_tokens": 17408,
+      "tool_calls": 1,
+      "seconds": 14.6
+    },
+    {
+      "input_tokens": 24165,
+      "output_tokens": 1645,
+      "cached_tokens": 20736,
+      "tool_calls": 1,
+      "seconds": 11.1
+    },
+    {
+      "input_tokens": 30195,
+      "output_tokens": 2375,
+      "cached_tokens": 24064,
+      "tool_calls": 1,
+      "seconds": 15.5
+    },
+    {
+      "input_tokens": 33270,
+      "output_tokens": 2350,
+      "cached_tokens": 30080,
+      "tool_calls": 1,
+      "seconds": 15.5
+    },
+    {
+      "input_tokens": 35722,
+      "output_tokens": 1117,
+      "cached_tokens": 33152,
+      "tool_calls": 1,
+      "seconds": 6.3
+    },
+    {
+      "input_tokens": 38523,
+      "output_tokens": 1651,
+      "cached_tokens": 35712,
+      "tool_calls": 1,
+      "seconds": 13.1
+    },
+    {
+      "input_tokens": 40663,
+      "output_tokens": 3449,
+      "cached_tokens": 38400,
+      "tool_calls": 1,
+      "seconds": 23.5
+    },
+    {
+      "input_tokens": 44139,
+      "output_tokens": 385,
+      "cached_tokens": 40576,
+      "tool_calls": 1,
+      "seconds": 4.2
+    },
+    {
+      "input_tokens": 44549,
+      "output_tokens": 428,
+      "cached_tokens": 44032,
+      "tool_calls": 1,
+      "seconds": 4.4
+    },
+    {
+      "input_tokens": 45195,
+      "output_tokens": 1753,
+      "cached_tokens": 44544,
+      "tool_calls": 1,
+      "seconds": 13.2
+    },
+    {
+      "input_tokens": 47061,
+      "output_tokens": 200,
+      "cached_tokens": 45184,
+      "tool_calls": 1,
+      "seconds": 3.5
+    },
+    {
+      "input_tokens": 47724,
+      "output_tokens": 752,
+      "cached_tokens": 46976,
+      "tool_calls": 1,
+      "seconds": 5.8
+    },
+    {
+      "input_tokens": 48672,
+      "output_tokens": 4645,
+      "cached_tokens": 47616,
+      "tool_calls": 1,
+      "seconds": 31.1
+    },
+    {
+      "input_tokens": 53709,
+      "output_tokens": 2761,
+      "cached_tokens": 48640,
+      "tool_calls": 1,
+      "seconds": 19.6
+    },
+    {
+      "input_tokens": 56094,
+      "output_tokens": 3856,
+      "cached_tokens": 0,
+      "tool_calls": 0,
+      "seconds": 26.7
+    }
+  ],
+  "request_ids": [
+    "eefac0e95196f7ac3c8c449a06ef0d5a",
+    "465f1126425d148c1e65201c3eb0ceb4",
+    "f289d05fb40cfb44992fb5a72209ae01",
+    "9a550e65b9b7ec23b8eb449ae4d35d73",
+    "94fd73961eab9fd308faf34055ca1f55",
+    "ff3139d64914622ceba34aff67ede2a7",
+    "e1a9ea92c6e41092847cbfe3c7b9e438",
+    "3b48386a99fb790d46b8331cf168a855",
+    "f4507e8bc1c89b5f3e514bd3fe1c678e",
+    "1cc603c5844d4cb7a9e159d0b9f762ac",
+    "bd1481e83f7eefb49b95c9f4db916dcb",
+    "17cf5eb05a6ff553e328254c1b043c1d",
+    "8907264871c5acad9fe03b362b41ac89",
+    "a87c9205658bd31ef414d5dacbc69de0",
+    "d99b74fe0885612c70565b01812d5b17",
+    "ddf70b41449b6b0f4aa7ce36dd75d63f",
+    "92458ba6375ac95c2d5139d33af6eba0",
+    "8d6814ff85deb56a6244b7488a5c55f4",
+    "3a5e18b9f83a1379d45570f425116252",
+    "742e8a78b95a0bb33cb917e14337cc6e"
+  ],
+  "served_models": [
+    "deepseek-v4.1-flash"
+  ],
+  "input_tokens": 644168,
+  "output_tokens": 39201,
+  "cached_tokens": 533760,
+  "status": "end_turn",
+  "forced_report": true,
+  "refusal_category": null,
+  "report": "**Report on `region.fasta` (region_009, 3,000 bp)**\n\n**Overall composition**\n- Length: 3,000 bp.\n- Base composition: A = 743, T = 867, G = 709, C = 681; GC content = 46.3%.\n- Windowed GC analysis shows a pronounced AT-rich segment roughly between coordinates **1,200\u20132,100** (GC ~32\u201338%), flanked by GC-richer regions (52\u201357%). Codon-based GC3 values also split the region: the AT-rich middle ORFs have GC3 ~29\u201334%, while flanking ORFs have GC3 ~62\u201371%, consistent with a possible horizontally acquired/foreign segment.\n\n**Major open reading frames**\nCoordinates are 0-based, end-exclusive.\n\n- **Plus strand, 270\u20131158 (296 aa):** Longest ORF in the region. Starts with ATG and encodes a highly hydrophobic protein (GRAVY \u2248 0.89) with several predicted transmembrane segments. This is very likely an integral membrane protein.\n- **Plus strand, 1195\u20131633 (146 aa):** AT-rich ORF, likely starts with TTG; an alternative ATG at 1219 would give a 138-aa protein. The product is hydrophobic and contains long predicted membrane-spanning segments.\n- **Plus strand, 1607\u20132027 (140 aa):** AT-rich ORF, likely starts with TTG; alternative ATG starts at 1649 (126 aa) and 1664 (121 aa). It is hydrophobic, with a strong C-terminal transmembrane segment. This ORF overlaps the preceding ORF (1195\u20131633) by 26 bp in a different frame.\n- **Minus strand, 2075\u20132750 (225 aa):** Reverse-oriented ORF in the GC-rich segment; likely starts with GTG. It overlaps the plus-strand ORFs in this region.\n- **Plus strand, 2525\u20132963 (146 aa):** GC-rich ORF starting with ATG, overlapping the reverse-oriented ORF noted above.\n- Additional shorter ORFs are present, e.g. a plus-strand ORF at **2253\u20132523** (90 aa) and a minus-strand ORF at **2650\u20132950** (100 aa); some of these may be alternative-start or spurious predictions.\n\n**Notable sequence features**\n- A strong potential **rho-independent transcription terminator** is present at approximately **2036\u20132060**, consisting of a 10-bp stem-loop (arms 2036\u20132045 and 2051\u20132060, 5-nt loop 2046\u20132050), followed by a U-rich tract around **2061\u20132070**. This lies just downstream of the AT-rich plus-strand ORFs and suggests an operon boundary.\n- The region contains several overlapping ORFs, especially in the AT-rich middle segment. This compact arrangement suggests a small gene cluster/operon rather than a single gene.\n- No exact long direct repeats (\u226520 bp) or inverted repeats (\u226518 bp) were detected, so there is no obvious CRISPR array, insertion-sequence terminal repeat, or large internal duplication in this 3-kb window.\n- The strongest functional inference is that at least two and probably several predicted proteins are membrane-associated. The longest ORF (270\u20131158) is the most convincing membrane-protein candidate.\n\n**Conclusion**\nThe sequence does not appear featureless. Its most notable properties are the presence of a long hydrophobic integral-membrane-protein ORF at **270\u20131158**, an AT-rich middle segment containing overlapping membrane-protein-like ORFs around **1195\u20132027**, a GC-rich reverse-oriented ORF at **2075\u20132750**, and a predicted rho-independent terminator at **2036\u20132060**. Without a reference database, specific gene names/functions cannot be assigned confidently, but the sequence is clearly protein-coding and likely represents a compact membrane-protein gene cluster or genomic island segment.",
+  "nt_run_from_tools": 580,
+  "seen_intervals": [
+    [
+      1,
+      580
+    ],
+    [
+      584,
+      621
+    ],
+    [
+      632,
+      666
+    ],
+    [
+      668,
+      718
+    ],
+    [
+      785,
+      834
+    ],
+    [
+      863,
+      897
+    ],
+    [
+      932,
+      951
+    ],
+    [
+      959,
+      978
+    ],
+    [
+      1161,
+      1280
+    ],
+    [
+      1313,
+      1343
+    ],
+    [
+      1360,
+      1388
+    ],
+    [
+      1410,
+      1429
+    ],
+    [
+      1534,
+      1564
+    ],
+    [
+      1578,
+      1740
+    ],
+    [
+      1789,
+      1880
+    ],
+    [
+      2001,
+      2180
+    ],
+    [
+      2234,
+      2277
+    ],
+    [
+      2501,
+      2560
+    ],
+    [
+      2641,
+      2700
+    ],
+    [
+      2724,
+      2768
+    ],
+    [
+      2779,
+      2807
+    ],
+    [
+      2814,
+      2847
+    ]
+  ],
+  "tool_errors": 0,
+  "seconds": 278.4,
+  "provider": "opencode-go",
+  "rep": 0,
+  "claims": {
+    "features": [
+      {
+        "type": "other",
+        "start": 1200,
+        "end": 2100,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "AT-rich segment, possible horizontally acquired/foreign segment"
+      },
+      {
+        "type": "gene",
+        "start": 270,
+        "end": 1158,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "long hydrophobic integral membrane protein ORF (296 aa)"
+      },
+      {
+        "type": "gene",
+        "start": 1195,
+        "end": 1633,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "AT-rich membrane-spanning ORF (146 aa)"
+      },
+      {
+        "type": "gene",
+        "start": 1607,
+        "end": 2027,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "AT-rich ORF with C-terminal transmembrane segment (140 aa)"
+      },
+      {
+        "type": "gene",
+        "start": 2075,
+        "end": 2750,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "reverse-oriented GC-rich ORF (225 aa)"
+      },
+      {
+        "type": "gene",
+        "start": 2525,
+        "end": 2963,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "GC-rich ORF (146 aa)"
+      },
+      {
+        "type": "gene",
+        "start": 2253,
+        "end": 2523,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "shorter plus-strand ORF (90 aa)"
+      },
+      {
+        "type": "gene",
+        "start": 2650,
+        "end": 2950,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "shorter minus-strand ORF (100 aa)"
+      },
+      {
+        "type": "other",
+        "start": 2036,
+        "end": 2060,
+        "unit_length": null,
+        "copy_number": null,
+        "description": "rho-independent transcription terminator"
+      }
+    ],
+    "named_identity": [
+      "region_009"
+    ]
+  },
+  "judge_model": "kimi-k2.7-code"
+}
